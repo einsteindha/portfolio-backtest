@@ -155,7 +155,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
         oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')addUSStock()">
       <button class="search-btn" id="searchBtn" onclick="addUSStock()">추가</button>
     </div>
-    <div class="search-hint" id="searchHint">국내 종목: 종목명·티커 입력 시 자동완성 ／ 미국 종목: 티커 직접 입력 후 추가</div>
+    <div class="search-hint" id="searchHint">국내 종목: 종목명·티커 입력 시 자동완성<br>미국 종목: 티커 직접 입력 후 추가</div>
     <div id="searchResults"></div>
     <button class="deposit-toggle-btn" id="depositToggleBtn" onclick="toggleDepositForm()">+ 예금 · 발행어음 추가</button>
     <div id="depositFormWrap" style="display:none">
@@ -471,7 +471,7 @@ function addAssetFromDB(ticker,name,market,sector){
   addAsset({ticker,name,type:market==='ETF'?'ETF':'주식',currency:isKR?'KRW':'USD',amount:''});
   document.getElementById('searchInput').value='';
   clearResults();
-  document.getElementById('searchHint').textContent='국내 종목: 종목명·티커 입력 시 자동완성 ／ 미국 종목: 티커 직접 입력 후 추가';
+  document.getElementById('searchHint').innerHTML='국내 종목: 종목명·티커 입력 시 자동완성<br>미국 종목: 티커 직접 입력 후 추가';
 }
 
 // Add US stock (ticker direct input)
