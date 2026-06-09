@@ -701,8 +701,8 @@ async function fetchAndMergePrices(asset,startYear,endYear){
   const actual = await fetchMonthlyPrices(asset.ticker,startYear,endYear);
   const proxyInfo = getProxyForAsset(asset);
 
-  // 프록시 불필요 or ETF 데이터가 startYear 커버
-  if(!proxyInfo || actual.firstYear<=startYear){
+  // 프록시 불필요 or 실제 데이터가 startYear 이미 커버
+  if(!proxyInfo || actual.firstYear>=startYear){
     return {...actual, proxyNote:null};
   }
 
