@@ -352,6 +352,64 @@ function getProxyForAsset(asset){
   return null;
 }
 
+// ── Asset class classification ─────────────────────────────────
+const CLASS_COLORS={
+  '국내주식':'#185FA5','선진국주식':'#D85A30','신흥국주식':'#BA7517',
+  '국내채권':'#1D9E75','선진국채권':'#2a7c6f','신흥국채권':'#7F77DD',
+  '국내리츠':'#993556','해외리츠':'#E15B85',
+  '대체투자자산':'#8B6914','현금성자산':'#5C8FA0','예금성자산':'#B8A060'
+};
+const US_CLASS={
+  SPY:'선진국주식',IVV:'선진국주식',VOO:'선진국주식',QQQ:'선진국주식',VTI:'선진국주식',
+  VGT:'선진국주식',XLK:'선진국주식',SCHD:'선진국주식',VIG:'선진국주식',DVY:'선진국주식',
+  EFA:'선진국주식',VEA:'선진국주식',EWJ:'선진국주식',VGK:'선진국주식',ACWI:'선진국주식',
+  SOXX:'선진국주식',XLF:'선진국주식',XLE:'선진국주식',XLV:'선진국주식',XLC:'선진국주식',
+  CARZ:'선진국주식',LIT:'대체투자자산',
+  EEM:'신흥국주식',VWO:'신흥국주식',MCHI:'신흥국주식',INDA:'신흥국주식',EWY:'신흥국주식',
+  VNQ:'해외리츠',IYR:'해외리츠',VNQI:'해외리츠',
+  TLT:'선진국채권',AGG:'선진국채권',BND:'선진국채권',LQD:'선진국채권',
+  IEF:'선진국채권',SHY:'선진국채권',HYG:'선진국채권',JNK:'선진국채권',
+  EMB:'신흥국채권',
+  GLD:'대체투자자산',IAU:'대체투자자산',SLV:'대체투자자산',
+  USO:'대체투자자산',GSG:'대체투자자산',PDBC:'대체투자자산',
+  SHV:'현금성자산',BIL:'현금성자산',SGOV:'현금성자산',
+};
+function getAssetClass(asset){
+  if(asset.type==='예금') return '예금성자산';
+  const s=asset.sector||'';
+  const n=(asset.name||'').toLowerCase();
+  const isKS=asset.ticker.endsWith('.KS');
+  if(isKS){
+    if(!asset.type||asset.type==='주식'||s==='국내주식'||s==='기타'||s==='') return '국내주식';
+    if(s==='해외주식'){
+      if(/신흥|중국|인도|베트남|이머징|em/.test(n)) return '신흥국주식';
+      return '선진국주식';
+    }
+    if(s==='채권'){
+      if(/국고|한국|국내|kis|krw/.test(n)) return '국내채권';
+      if(/신흥|em/.test(n)) return '신흥국채권';
+      return '선진국채권';
+    }
+    if(s==='단기채'||s==='MMF') return '현금성자산';
+    if(s==='리츠'){
+      if(/미국|해외|글로벌|msci|global/.test(n)) return '해외리츠';
+      return '국내리츠';
+    }
+    if(s==='원자재') return '대체투자자산';
+    if(s==='배당'){
+      if(/고배당|한국|korea/.test(n)) return '국내주식';
+      return '선진국주식';
+    }
+    if(s==='섹터'){
+      if(/한국|국내|kospi|코스피/.test(n)) return '국내주식';
+      return '선진국주식';
+    }
+    if(s==='레버리지'||s==='인버스') return '대체투자자산';
+    return '국내주식';
+  }
+  return US_CLASS[asset.ticker.toUpperCase()]||'선진국주식';
+}
+
 // ── Korean unit formatter ──────────────────────────────────────
 // 30523054 → "3천 52만 3,054원" / 150000000 → "1억 5천만원"
 function formatKoreanUnit(val, currency) {
@@ -463,7 +521,7 @@ function clearResults(){
 // Add from KR DB
 function addAssetFromDB(ticker,name,market,sector){
   const isKR = ticker.endsWith('.KS')||ticker.endsWith('.KS');
-  addAsset({ticker,name,type:market==='ETF'?'ETF':'주식',currency:isKR?'KRW':'USD',amount:''});
+  addAsset({ticker,name,type:market==='ETF'?'ETF':'주식',currency:isKR?'KRW':'USD',amount:'',sector});
   document.getElementById('searchInput').value='';
   clearResults();
   document.getElementById('searchHint').innerHTML='국내 종목: 종목명·티커 입력 시 자동완성<br>미국 종목: 티커 직접 입력 후 추가';
@@ -770,6 +828,20 @@ function computeMetrics(pv){
   let pk=pv[0].value,mdd=0;
   pv.forEach(p=>{if(p.value>pk)pk=p.value;const d=(pk-p.value)/pk;if(d>mdd)mdd=d;});
   return{cagr,vol,sharpe,mdd};
+}
+
+// 개별 자산 가격 배열로부터 CAGR/변동성 계산
+function computePriceMetrics(prices,csYear,csMonth,endYear,endMonth){
+  const sub=prices.filter(p=>{const pm=p.year*12+p.month;return pm>=csYear*12+csMonth&&pm<=endYear*12+endMonth;});
+  if(sub.length<2)return null;
+  const returns=[];
+  for(let k=1;k<sub.length;k++)returns.push((sub[k].price-sub[k-1].price)/sub[k-1].price);
+  const iv=sub[0].price,fv=sub[sub.length-1].price;
+  const yrs=sub.length/12;
+  const cagr=yrs>0?(Math.pow(fv/iv,1/yrs)-1)*100:0;
+  const avg=returns.reduce((s,v)=>s+v,0)/(returns.length||1);
+  const vol=Math.sqrt(returns.reduce((s,v)=>s+(v-avg)**2,0)/(returns.length||1))*Math.sqrt(12)*100;
+  return{cagr,vol};
 }
 
 // ── Backtest engine ────────────────────────────────────────────
@@ -1107,6 +1179,19 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
       <div class="chart-header"><div class="chart-title">연도별 수익률</div></div>
       <div class="annual-grid">${annualHTML}</div>
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:1.25rem">
+      <div class="chart-section" style="margin-bottom:0">
+        <div class="chart-header"><div class="chart-title">수익-위험 지도</div></div>
+        <div style="font-size:.75rem;color:var(--text3);margin-bottom:.5rem">백테스트 기간 전체 기준 연평균 수익률 vs 연환산 변동성</div>
+        <div style="position:relative;width:100%;height:280px"><canvas id="riskReturnChart"></canvas></div>
+        <div id="riskReturnLegend" style="display:flex;flex-wrap:wrap;gap:.4rem .75rem;margin-top:.75rem;font-size:.72rem;color:var(--text2)"></div>
+      </div>
+      <div class="chart-section" style="margin-bottom:0">
+        <div class="chart-header"><div class="chart-title">자산군 구성</div></div>
+        <div style="font-size:.75rem;color:var(--text3);margin-bottom:.5rem">초기 투자금액 기준 자산군별 비중</div>
+        <div style="position:relative;width:100%;height:280px"><canvas id="assetClassChart"></canvas></div>
+      </div>
+    </div>
     ${assets.length>1?`<div class="chart-section"><div class="chart-header"><div class="chart-title">자산 간 상관관계</div></div><div style="font-size:.78rem;color:var(--text3);margin-bottom:.5rem">백테스트 기간 월별 수익률 기반 피어슨 상관계수</div>${corrHTML}</div>`:''}
     ${fxHTML}
     <div class="disclaimer">본 백테스트는 과거 데이터 기반 시뮬레이션이며 미래 성과를 보장하지 않습니다. 배당 재투자는 수정종가(Adjusted Close)로 근사 반영됩니다. 거래 비용, 세금, 슬리피지는 반영되지 않습니다. 데이터 출처: Yahoo Finance. IdentiFi는 투자 자문업자가 아닙니다.</div>`;
@@ -1124,6 +1209,80 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
     new Chart(document.getElementById('cumChart'),{type:'line',data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y>=0?'+':''}${ctx.parsed.y.toFixed(2)}%`}}},scales:{x:{ticks:{color:tc,font:{size:11,family:'IBM Plex Mono'},autoSkip:true,maxTicksLimit:12},grid:{color:gc}},y:{ticks:{color:tc,font:{size:11,family:'IBM Plex Mono'},callback:v=>(v>=0?'+':'')+v+'%'},grid:{color:gc}}},interaction:{mode:'index',intersect:false}}});
     const leg=document.getElementById('mainLegend');
     if(leg)leg.innerHTML=datasets.map(d=>`<span class="legend-item"><span class="legend-dot" style="background:${d.borderColor}"></span>${d.label}</span>`).join('');
+
+    // ── 수익-위험 지도 ──────────────────────────────────────────
+    const endP=r.portValues[r.portValues.length-1];
+    const totalInit=r.portValues[0].assetVals.reduce((s,v)=>s+v,0)||1;
+    const rrDatasets=[];
+    const legendItems=[];
+    assets.forEach((a,i)=>{
+      let pm=null;
+      if(a.type==='예금'){
+        pm={cagr:a.rate||0,vol:0};
+      } else if(a.prices&&a.prices.length>=2){
+        pm=computePriceMetrics(a.prices,r.commonStart.year,r.commonStart.month,endP.year,endP.month);
+      }
+      if(!pm)return;
+      const cls=getAssetClass(a);
+      const col=CLASS_COLORS[cls]||'#999';
+      const wPct=r.portValues[0].assetVals[i]/totalInit*100;
+      const radius=Math.max(5,Math.min(18,wPct*0.45+5));
+      rrDatasets.push({
+        label:a.name||a.ticker,
+        data:[{x:parseFloat(pm.vol.toFixed(2)),y:parseFloat(pm.cagr.toFixed(2))}],
+        backgroundColor:col+'BB',borderColor:col,borderWidth:1.5,
+        pointRadius:radius,pointHoverRadius:radius+2,pointStyle:'circle',
+      });
+      legendItems.push({label:a.name||a.ticker,color:col});
+    });
+    // 포트폴리오 포인트
+    rrDatasets.push({
+      label:'포트폴리오',
+      data:[{x:parseFloat(r.annualVol.toFixed(2)),y:parseFloat(r.cagr.toFixed(2))}],
+      backgroundColor:'#1A191699',borderColor:'#1A1916',borderWidth:2,
+      pointRadius:13,pointHoverRadius:15,pointStyle:'star',
+    });
+    legendItems.push({label:'포트폴리오 ★',color:'#1A1916'});
+    new Chart(document.getElementById('riskReturnChart'),{
+      type:'scatter',
+      data:{datasets:rrDatasets},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},
+          tooltip:{callbacks:{label:ctx=>{const d=ctx.raw;return[ctx.dataset.label,`수익률 ${d.y>=0?'+':''}${d.y.toFixed(1)}%`,`변동성 ${d.x.toFixed(1)}%`];}}}
+        },
+        scales:{
+          x:{title:{display:true,text:'연환산 변동성 (%)',color:tc,font:{size:11,family:'IBM Plex Mono'}},ticks:{color:tc,font:{size:10,family:'IBM Plex Mono'}},grid:{color:gc}},
+          y:{title:{display:true,text:'연평균 수익률 (%)',color:tc,font:{size:11,family:'IBM Plex Mono'}},ticks:{color:tc,font:{size:10,family:'IBM Plex Mono'},callback:v=>(v>=0?'+':'')+v+'%'},grid:{color:gc}}
+        }
+      }
+    });
+    const rrLeg=document.getElementById('riskReturnLegend');
+    if(rrLeg)rrLeg.innerHTML=legendItems.map(d=>`<span style="display:flex;align-items:center;gap:.3rem"><span style="width:8px;height:8px;border-radius:50%;background:${d.color};display:inline-block;flex-shrink:0"></span>${d.label}</span>`).join('');
+
+    // ── 자산군 구성 ──────────────────────────────────────────────
+    const classMap={};
+    assets.forEach((a,i)=>{
+      const cls=getAssetClass(a);
+      const w=r.portValues[0].assetVals[i]/totalInit*100;
+      classMap[cls]=(classMap[cls]||0)+w;
+    });
+    const classEntries=Object.entries(classMap).filter(([,v])=>v>0.01).sort((a,b)=>b[1]-a[1]);
+    const classLabels=classEntries.map(([k])=>k);
+    const classVals=classEntries.map(([,v])=>parseFloat(v.toFixed(1)));
+    const classCols=classLabels.map(k=>CLASS_COLORS[k]||'#999');
+    new Chart(document.getElementById('assetClassChart'),{
+      type:'bar',
+      data:{labels:classLabels,datasets:[{data:classVals,backgroundColor:classCols,borderWidth:0,borderRadius:2}]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},
+          tooltip:{callbacks:{label:ctx=>`${ctx.parsed.x.toFixed(1)}%`}}
+        },
+        scales:{
+          x:{max:100,ticks:{color:tc,font:{size:10,family:'IBM Plex Mono'},callback:v=>v+'%'},grid:{color:gc}},
+          y:{ticks:{color:tc,font:{size:11,family:'Noto Sans KR'}},grid:{display:false}}
+        }
+      }
+    });
   },100);
 }
 
