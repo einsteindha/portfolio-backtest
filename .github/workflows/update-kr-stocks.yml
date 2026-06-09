@@ -1,0 +1,40 @@
+name: Update Korean Stock DB
+
+on:
+  schedule:
+    # 매주 일요일 오전 9시 KST (= UTC 00:00)
+    - cron: '0 0 * * 0'
+  workflow_dispatch:  # 수동 실행 허용
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install pykrx
+
+      - name: Run update script
+        run: python scripts/update_kr_stocks.py
+
+      - name: Commit & push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/kr_stocks.json
+          if git diff --cached --quiet; then
+            echo "No changes — skip commit"
+          else
+            TODAY=$(date -u +%Y-%m-%d)
+            git commit -m "chore: update KR stock DB ($TODAY)"
+            git push
+          fi

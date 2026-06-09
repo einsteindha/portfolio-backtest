@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+.claude/
+identifi-tool08-portfolio-backtest.html
