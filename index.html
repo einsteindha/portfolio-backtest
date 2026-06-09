@@ -366,13 +366,20 @@ const US_CLASS={
   SOXX:'선진국주식',XLF:'선진국주식',XLE:'선진국주식',XLV:'선진국주식',XLC:'선진국주식',
   CARZ:'선진국주식',LIT:'대체투자자산',
   EEM:'신흥국주식',VWO:'신흥국주식',MCHI:'신흥국주식',INDA:'신흥국주식',EWY:'신흥국주식',
-  VNQ:'해외리츠',IYR:'해외리츠',VNQI:'해외리츠',
+  VNQ:'해외리츠',IYR:'해외리츠',VNQI:'해외리츠',SCHH:'해외리츠',
+  O:'해외리츠',AMT:'해외리츠',PLD:'해외리츠',EQIX:'해외리츠',
+  SPG:'해외리츠',DLR:'해외리츠',PSA:'해외리츠',WELL:'해외리츠',
+  AVB:'해외리츠',EQR:'해외리츠',WPC:'해외리츠',NNN:'해외리츠',
+  STAG:'해외리츠',VICI:'해외리츠',MPW:'해외리츠',
   TLT:'선진국채권',AGG:'선진국채권',BND:'선진국채권',LQD:'선진국채권',
   IEF:'선진국채권',SHY:'선진국채권',HYG:'선진국채권',JNK:'선진국채권',
   EMB:'신흥국채권',
-  GLD:'대체투자자산',IAU:'대체투자자산',SLV:'대체투자자산',
-  USO:'대체투자자산',GSG:'대체투자자산',PDBC:'대체투자자산',
-  SHV:'현금성자산',BIL:'현금성자산',SGOV:'현금성자산',
+  GLD:'대체투자자산',IAU:'대체투자자산',SGOL:'대체투자자산',PHYS:'대체투자자산',
+  SLV:'대체투자자산',PPLT:'대체투자자산',PALL:'대체투자자산',
+  USO:'대체투자자산',GSG:'대체투자자산',PDBC:'대체투자자산',DJP:'대체투자자산',
+  DBO:'대체투자자산',DBB:'대체투자자산',CPER:'대체투자자산',
+  BTC:'대체투자자산',BITO:'대체투자자산',GBTC:'대체투자자산',
+  SHV:'현금성자산',BIL:'현금성자산',SGOV:'현금성자산',CSHI:'현금성자산',
 };
 function getAssetClass(asset){
   if(asset.type==='예금') return '예금성자산';
@@ -856,8 +863,8 @@ function pearsonCorr(a,b){
 
 function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrency,applyFX){
   const fxMap={};
-  if(fxData) fxData.forEach(d=>{fxMap[`${d.year}-${d.month}`]=d.price;});
-  const getFX=(y,m)=>fxMap[`${y}-${m}`]||fxMap[`${y}-${m-1}`]||1350;
+  if(fxData) fxData.forEach(d=>{ if(d.price>=800&&d.price<=2000) fxMap[`${d.year}-${d.month}`]=d.price; });
+  const getFX=(y,m)=>fxMap[`${y}-${m}`]??fxMap[`${y}-${m-1}`]??1350;
 
   // 전체 월 목록
   const months=[];
