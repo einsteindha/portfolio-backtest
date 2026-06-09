@@ -687,8 +687,8 @@ async function fetchMonthlyPrices(ticker,startYear,endYear){
     const dt=new Date(ts*1000);
     if(closes[i]!=null) prices.push({year:dt.getFullYear(),month:dt.getMonth()+1,price:closes[i]});
   });
-  const first=new Date(timestamps[0]*1000);
-  return{prices,firstYear:first.getFullYear(),firstMonth:first.getMonth()+1};
+  if(!prices.length) throw new Error('데이터 없음');
+  return{prices,firstYear:prices[0].year,firstMonth:prices[0].month};
 }
 
 async function fetchFXData(startYear,endYear){
