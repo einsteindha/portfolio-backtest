@@ -856,14 +856,7 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
           if(!active[i])return s;
           return s+(a.type==='예금'?units[i]:(curP[i]??0)*units[i]);
         },0);
-        // 신규 자산들의 목표비중 합
-        const newTotalW=newOnes.reduce((s,isNew,i)=>s+(isNew?targetW[i]:0),0);
-        const cut=Math.min(newTotalW,1);
-        // 기존 자산 비례 차감
-        if(portTotal>0&&cut>0){
-          assets.forEach((_,j)=>{if(active[j])units[j]*=(1-cut);});
-        }
-        // 신규 자산 매수: 포트폴리오 총액 × 해당 자산 목표비중
+        // 신규 자산 매수: 포트폴리오 총액 × 해당 자산 목표비중 (기존 자산 건드리지 않음)
         newOnes.forEach((isNew,i)=>{
           if(!isNew)return;
           const cap=portTotal*targetW[i];
