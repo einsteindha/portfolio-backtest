@@ -262,6 +262,10 @@ let KR_STOCKS = [{"t":"005930.KS","n":"삼성전자","m":"KOSPI","s":"반도체"
 // Async-replace seed data with the latest JSON (GitHub Actions updates this weekly)
 fetch('data/kr_stocks.json').then(r=>r.ok?r.json():null).then(d=>{ if(d&&d.length) KR_STOCKS=d; }).catch(()=>{});
 
+// ── US stock DB (S&P500 + major ETFs) ─────────────────────────
+let US_STOCKS = [];
+fetch('data/us_stocks.json').then(r=>r.ok?r.json():null).then(d=>{ if(d&&d.length) US_STOCKS=d; }).catch(()=>{});
+
 // ── Korean unit formatter ──────────────────────────────────────
 function formatKoreanUnit(val, currency) {
   const n = parseFloat(val);
@@ -303,44 +307,57 @@ const state = { assets:[], idCounter:0 };
   ey.value = cur; // default: current year
 })();
 
-// ── Korean stock search (client-side) ─────────────────────────
+// ── Unified search (KR + US) ───────────────────────────────────
 function onSearchInput(q){
   q = q.trim();
   if(!q){ clearResults(); return; }
-  // If looks like US ticker (no Korean chars, length ≤6) — show hint
-  const hasKorean = /[가-힣]/.test(q);
-  const looksUS = !hasKorean && q.length <= 6 && /^[A-Za-z0-9.\-^]+$/.test(q);
-  // Search KR_STOCKS
   const ql = q.toLowerCase();
-  const matches = KR_STOCKS.filter(s=>
+  const hasKorean = /[가-힣]/.test(q);
+
+  // KR search — always run
+  const krMatches = KR_STOCKS.filter(s=>
     s.n.toLowerCase().includes(ql) ||
     s.t.toLowerCase().includes(ql) ||
-    s.t.replace('.KS','').replace('.KS','').toLowerCase() === ql
-  ).slice(0,8);
+    s.t.replace('.KS','').toLowerCase() === ql
+  ).slice(0, hasKorean ? 8 : 5);
 
-  if(matches.length){
-    renderKRResults(matches);
-    document.getElementById('searchHint').textContent = '국내 종목 검색 결과';
-  } else if(looksUS){
-    clearResults();
-    document.getElementById('searchHint').textContent = '미국 종목으로 추가하려면 티커 입력 후 [추가] 버튼을 누르세요';
+  // US search — only for non-Korean queries
+  const usMatches = hasKorean ? [] : US_STOCKS.filter(s=>{
+    const tl = s.t.toLowerCase();
+    return s.n.toLowerCase().includes(ql) ||
+           tl === ql ||
+           (ql.length >= 2 && tl.startsWith(ql));
+  }).slice(0, 5);
+
+  const combined = [...krMatches, ...usMatches].slice(0, 8);
+
+  if(combined.length){
+    renderSearchResults(combined);
+    const hint = krMatches.length && usMatches.length
+      ? `국내 ${krMatches.length}건 · 해외 ${usMatches.length}건`
+      : krMatches.length ? '국내 종목 검색 결과'
+      : '해외 종목 검색 결과';
+    document.getElementById('searchHint').textContent = hint;
   } else {
     clearResults();
-    document.getElementById('searchHint').textContent = '검색 결과 없음 — 미국 종목이라면 티커를 입력하고 [추가]를 누르세요';
+    document.getElementById('searchHint').textContent =
+      '검색 결과 없음 — 미국 종목 티커를 직접 입력하고 [추가]를 누르세요';
   }
 }
 
-function renderKRResults(list){
+function renderSearchResults(list){
   const el = document.getElementById('searchResults');
   el.innerHTML = '<div class="search-results">' + list.map(s=>{
-    const mktClass = s.m==='ETF'?'etf':'kr';
+    const isKR = s.t.endsWith('.KS');
+    const badgeClass = isKR ? (s.m==='ETF' ? 'etf' : 'kr') : 'us';
+    const badgeLabel = isKR ? s.m : (s.m==='ETF' ? 'US ETF' : 'US');
     return `<div class="search-result-item" onclick="addAssetFromDB('${s.t}','${escHtml(s.n)}','${s.m}','${s.s}')">
       <div>
         <div class="result-name">${escHtml(s.n)}</div>
         <div class="result-ticker">${s.t} · ${s.s}</div>
       </div>
       <div class="result-badges">
-        <span class="badge ${mktClass}">${s.m}</span>
+        <span class="badge ${badgeClass}">${badgeLabel}</span>
       </div>
     </div>`;
   }).join('') + '</div>';
@@ -365,10 +382,14 @@ async function addUSStock(){
   if(!q) return;
   const hasKorean = /[가-힣]/.test(q);
   if(hasKorean){ return; } // KR stock — handled by autocomplete
-  // Check if it's in KR DB first
-  const krMatch = KR_STOCKS.find(s=>s.t.toLowerCase()===q.toLowerCase()||s.t.replace('.KS','').replace('.KS','')===q);
+  // KR DB
+  const ql2 = q.toLowerCase();
+  const krMatch = KR_STOCKS.find(s=>s.t.toLowerCase()===ql2||s.t.replace('.KS','').toLowerCase()===ql2);
   if(krMatch){ addAssetFromDB(krMatch.t,krMatch.n,krMatch.m,krMatch.s); return; }
-  // Treat as US ticker
+  // US DB
+  const usMatch = US_STOCKS.find(s=>s.t.toLowerCase()===ql2);
+  if(usMatch){ addAssetFromDB(usMatch.t,usMatch.n,usMatch.m,usMatch.s); return; }
+  // Unknown ticker — verify via Yahoo Finance
   const ticker = q.includes('.')?q:q; // keep as-is
   const btn = document.getElementById('searchBtn');
   btn.disabled=true; btn.textContent='확인중...';
