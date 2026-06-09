@@ -846,25 +846,29 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
       });
       initialized=true;
     } else {
-      const newlyAvail=avail.map((v,i)=>v&&!prevAvail[i]);
+      // 신규 자산: units===0 인 자산이 이번 달 처음 데이터를 얻은 경우
+      // (임시 데이터 공백 후 복귀한 자산은 units>0 이므로 제외)
+      const newlyAvail=avail.map((v,i)=>v&&units[i]===0);
       if(newlyAvail.some(Boolean)){
-        // 신규 자산 편입: 기존 자산 유지, 신규 자산 목표비중만큼 기존 자산에서 비례 차감 후 매수
+        // 기존 보유 자산(units>0) 평가 총액
         const curTotal=assets.reduce((s,a,i)=>{
-          if(!prevAvail[i])return s;
+          if(!avail[i]||newlyAvail[i])return s;
           return s+(a.type==='예금'?units[i]:(curP[i]??0)*units[i]);
         },0);
-        const sumAvailW=targetW.reduce((s,w,i)=>s+(avail[i]?w:0),0)||1;
-        const newAssetsW=targetW.reduce((s,w,i)=>s+(newlyAvail[i]?w:0),0);
-        const newCapitalTotal=curTotal*(newAssetsW/sumAvailW);
-        if(curTotal>0&&newCapitalTotal>0){
-          const deductRatio=newCapitalTotal/curTotal;
-          assets.forEach((_,j)=>{if(prevAvail[j])units[j]*=(1-deductRatio);});
+        // 신규 자산들의 목표비중 합 (원래 targetW 그대로 사용)
+        const newW=newlyAvail.reduce((s,isNew,i)=>s+(isNew?targetW[i]:0),0);
+        // 기존 자산에서 비례 차감 (각 자산 균등 비율로)
+        if(curTotal>0&&newW>0){
+          const cut=Math.min(newW,1);
+          assets.forEach((_,j)=>{
+            if(avail[j]&&!newlyAvail[j])units[j]*=(1-cut);
+          });
         }
-        const newSumW=newAssetsW||1;
+        // 신규 자산 매수: 총액 × 해당 자산 목표비중
         newlyAvail.forEach((isNew,i)=>{
           if(!isNew)return;
+          const cap=curTotal*targetW[i];
           const a=assets[i];
-          const cap=newCapitalTotal*(targetW[i]/newSumW);
           if(a.type==='예금'){units[i]=cap;return;}
           if(curP[i])units[i]=cap/curP[i];
         });
