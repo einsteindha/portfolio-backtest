@@ -266,6 +266,53 @@ fetch('data/kr_stocks.json').then(r=>r.ok?r.json():null).then(d=>{ if(d&&d.lengt
 let US_STOCKS = [];
 fetch('data/us_stocks.json').then(r=>r.ok?r.json():null).then(d=>{ if(d&&d.length) US_STOCKS=d; }).catch(()=>{});
 
+// ── ETF 대체 데이터 매핑 (상장 전 기간을 유사 지수/ETF로 연장) ─────
+const ETF_PROXY_MAP = {
+  // KOSPI200 추종
+  '069500.KS': {proxy:'^KS11', label:'KOSPI 지수'},       // KODEX 200
+  '102110.KS': {proxy:'^KS11', label:'KOSPI 지수'},       // TIGER 200
+  '285010.KS': {proxy:'^KS11', label:'KOSPI 지수'},       // KBSTAR 200
+  '278540.KS': {proxy:'^KS11', label:'KOSPI 지수'},       // KODEX MSCI Korea TR
+  '229200.KS': {proxy:'^KQ11', label:'KOSDAQ 지수'},      // KODEX 코스닥150
+  // 미국 S&P500
+  '379800.KS': {proxy:'SPY',   label:'S&P500(SPY)'},      // KODEX 미국S&P500
+  '360750.KS': {proxy:'SPY',   label:'S&P500(SPY)'},      // TIGER 미국S&P500
+  '411060.KS': {proxy:'SPY',   label:'S&P500(SPY)'},      // ACE 미국500대기업S&P500
+  '140710.KS': {proxy:'SPY',   label:'S&P500(SPY)'},      // KODEX 미국S&P500선물(H)
+  // 미국 나스닥100
+  '133690.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},   // TIGER 미국나스닥100
+  '367380.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},   // KODEX 미국나스닥100TR
+  '406970.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},   // TIGER 미국테크TOP10
+  '438330.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},   // KODEX 미국빅테크10
+  // 필라델피아 반도체
+  '381170.KS': {proxy:'SOXX',  label:'필라델피아반도체(SOXX)'},
+  // 미국채
+  '305080.KS': {proxy:'TLT',   label:'미국장기채(TLT)'},  // TIGER 미국채10년선물
+  // 글로벌 선진국
+  '195930.KS': {proxy:'VEA',   label:'선진국주식(VEA)'},  // TIGER 해외선진국MSCI World
+  // 차이나
+  '192090.KS': {proxy:'FXI',   label:'차이나(FXI)'},      // TIGER 차이나CSI300
+  '396520.KS': {proxy:'FXI',   label:'차이나(FXI)'},      // TIGER 차이나전기차
+  // 일본
+  '364980.KS': {proxy:'EWJ',   label:'일본(EWJ)'},        // TIGER 일본닛케이225
+  // 인도
+  '441680.KS': {proxy:'INDA',  label:'인도(INDA)'},       // KODEX 인도Nifty50
+  // 유럽
+  '245340.KS': {proxy:'VGK',   label:'유럽(VGK)'},        // TIGER 유로스탁스50
+  // 미국 배당
+  '459580.KS': {proxy:'SCHD',  label:'미국배당(SCHD)'},   // TIGER 미국배당다우존스
+  '448290.KS': {proxy:'SCHD',  label:'미국배당(SCHD)'},   // KODEX 미국배당프리미엄
+  // 리츠
+  '400810.KS': {proxy:'VNQ',   label:'미국리츠(VNQ)'},    // KODEX 리츠
+  '329200.KS': {proxy:'VNQ',   label:'미국리츠(VNQ)'},    // TIGER 미국MSCI리츠
+  // 골드
+  '132030.KS': {proxy:'GLD',   label:'금(GLD)'},          // KODEX 골드선물(H)
+  // 원유
+  '319640.KS': {proxy:'USO',   label:'원유(USO)'},        // KODEX WTI원유선물(H)
+  // 한국 ETF (한국 상장)
+  'EWY':       {proxy:'^KS11', label:'KOSPI 지수'},       // iShares MSCI South Korea
+};
+
 // ── Korean unit formatter ──────────────────────────────────────
 function formatKoreanUnit(val, currency) {
   const n = parseFloat(val);
@@ -603,6 +650,47 @@ async function fetchFXData(startYear,endYear){
   catch(e){return null;}
 }
 
+// ETF 상장 전 기간을 대체 데이터로 연장
+async function fetchAndMergePrices(asset,startYear,endYear){
+  const actual = await fetchMonthlyPrices(asset.ticker,startYear,endYear);
+  const proxyInfo = ETF_PROXY_MAP[asset.ticker];
+
+  // 프록시 불필요 or ETF 데이터가 startYear 커버
+  if(!proxyInfo || actual.firstYear<=startYear){
+    return {...actual, proxyNote:null};
+  }
+
+  try{
+    // 프록시 데이터를 ETF 상장 연도+1까지 수집
+    const proxyRaw = await fetchMonthlyPrices(proxyInfo.proxy, startYear, actual.firstYear+1);
+
+    // ETF 상장월의 프록시 가격 탐색 (±1개월 허용)
+    const listY=actual.firstYear, listM=actual.firstMonth;
+    const proxyAtListing = proxyRaw.prices.find(p=>p.year===listY&&p.month===listM)
+      || proxyRaw.prices.find(p=>p.year===listY&&Math.abs(p.month-listM)<=1);
+    if(!proxyAtListing) return {...actual, proxyNote:null};
+
+    const etfFirst = actual.prices[0].price;
+    const pxFirst  = proxyAtListing.price;
+
+    // 상장 전 기간의 합성 가격 생성
+    const synthetic = proxyRaw.prices
+      .filter(p=>p.year<listY||(p.year===listY&&p.month<listM))
+      .map(p=>({year:p.year,month:p.month,price:(p.price/pxFirst)*etfFirst}));
+
+    if(!synthetic.length) return {...actual, proxyNote:null};
+
+    return{
+      prices:[...synthetic,...actual.prices],
+      firstYear:synthetic[0].year,
+      firstMonth:synthetic[0].month,
+      proxyNote:`상장 전 기간은 ${proxyInfo.label} 데이터로 대체`
+    };
+  }catch(e){
+    return {...actual, proxyNote:null};
+  }
+}
+
 // ── Backtest engine ────────────────────────────────────────────
 function pearsonCorr(a,b){
   const n=Math.min(a.length,b.length);if(!n)return 0;
@@ -618,78 +706,121 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
   if(fxData) fxData.forEach(d=>{fxMap[`${d.year}-${d.month}`]=d.price;});
   const getFX=(y,m)=>fxMap[`${y}-${m}`]||fxMap[`${y}-${m-1}`]||1350;
 
-  // Common start date
-  let cs={year:startYear,month:1};
-  assets.forEach(a=>{
-    if(a.type==='예금')return;
-    if(!a.prices?.length)return;
-    if(a.firstYear>cs.year||(a.firstYear===cs.year&&a.firstMonth>cs.month))
-      cs={year:a.firstYear,month:a.firstMonth};
-  });
-
-  // Month list
-  const months=[];
-  let y=cs.year,m=cs.month;
-  while(y<endYear||(y===endYear&&m<=12)){months.push({year:y,month:m});m++;if(m>13){m=1;y++;} if(m>12){m=1;y++;}}
-  // fix month overflow
-  const months2=[];y=cs.year;m=cs.month;
-  while(y<endYear||(y===endYear&&m<=12)){months2.push({year:y,month:m});m++;if(m>12){m=1;y++;}}
+  // Full month list from startYear (per-asset data 있는 기간만 참여)
+  const months2=[];
+  for(let y=startYear,m=1;;){
+    months2.push({year:y,month:m});
+    if(y===endYear&&m===12)break;
+    m++;if(m>12){m=1;y++;}
+  }
   if(!months2.length)return null;
 
   const priceMaps=assets.map(a=>{
     const pm={};
-    if(a.type==='예金')return pm;
+    if(a.type==='예금')return pm;
     (a.prices||[]).forEach(p=>{pm[`${p.year}-${p.month}`]=p.price;});
     return pm;
   });
 
   const getBasePrice=(a,pm,y,m)=>{
-    const p=pm[`${y}-${m}`];if(!p)return null;
+    const p=pm[`${y}-${m}`];if(p==null)return null;
     if(!applyFX)return p;
     if(a.currency==='USD'&&baseCurrency==='KRW')return p*getFX(y,m);
     if(a.currency==='KRW'&&baseCurrency==='USD')return p/getFX(y,m);
     return p;
   };
 
+  // 목표 비중 (초기 투자금액 기준)
   const initAmounts=assets.map(a=>{
     let amt=Number(a.amount)||0;
     if(!applyFX)return amt;
-    if(a.currency==='USD'&&baseCurrency==='KRW')amt*=getFX(cs.year,cs.month);
-    if(a.currency==='KRW'&&baseCurrency==='USD')amt/=getFX(cs.year,cs.month);
+    const fx0=getFX(startYear,1);
+    if(a.currency==='USD'&&baseCurrency==='KRW')amt*=fx0;
+    if(a.currency==='KRW'&&baseCurrency==='USD')amt/=fx0;
     return amt;
   });
   const totalInit=initAmounts.reduce((s,v)=>s+v,0)||1;
-  const weights=initAmounts.map(v=>v/totalInit);
+  const targetW=initAmounts.map(v=>v/totalInit); // 고정 목표 비중
 
-  let units=assets.map((a,i)=>{
-    if(a.type==='예금')return initAmounts[i];
-    const p0=getBasePrice(a,priceMaps[i],cs.year,cs.month);
-    return p0?initAmounts[i]/p0:0;
-  });
+  // 실제 가용 자산의 비중 정규화 헬퍼
+  const getEffW=avail=>{
+    const sumW=targetW.reduce((s,w,i)=>s+(avail[i]?w:0),0)||1;
+    return targetW.map((w,i)=>avail[i]?w/sumW:0);
+  };
+
+  let units=assets.map(()=>0);
+  let prevAvail=assets.map(()=>false);
+  let initialized=false;
+  let portfolioCS=null;
 
   const portValues=[];
   const rebalPeriod=rebalance==='monthly'?1:rebalance==='quarterly'?3:rebalance==='annually'?12:999999;
 
   months2.forEach((mn,mi)=>{
-    const vals=assets.map((a,i)=>{
-      if(a.type==='예금'){
+    // 1. 예금 누적 수익 (직전 월 값 기준)
+    if(mi>0){
+      assets.forEach((a,i)=>{
+        if(a.type!=='예금'||!prevAvail[i])return;
         const r=a.compound==='monthly'?a.rate/100/12:a.compound==='annual'?Math.pow(1+a.rate/100,1/12)-1:a.rate/100/12;
-        if(mi===0)return units[i];
-        units[i]=units[i]*(1+r);return units[i];
+        units[i]*=(1+r);
+      });
+    }
+
+    // 2. 이번 달 가격 & 가용 여부
+    const curP=assets.map((a,i)=>a.type==='예금'?null:getBasePrice(a,priceMaps[i],mn.year,mn.month));
+    const avail=assets.map((a,i)=>a.type==='예금'||curP[i]!==null);
+    if(!avail.some(Boolean))return;
+
+    // 3. 최초 초기화 또는 신규 자산 편입 시 재조정
+    if(!initialized){
+      portfolioCS=mn;
+      const effW=getEffW(avail);
+      assets.forEach((a,i)=>{
+        if(!avail[i]){units[i]=0;return;}
+        const cap=totalInit*effW[i];
+        if(a.type==='예금'){units[i]=cap;return;}
+        units[i]=curP[i]?cap/curP[i]:0;
+      });
+      initialized=true;
+    } else {
+      const hasNew=avail.some((v,i)=>v&&!prevAvail[i]);
+      if(hasNew){
+        // 신규 상장 종목 편입: 현재 포트폴리오 총액으로 재조정
+        const curTotal=assets.reduce((s,a,i)=>{
+          if(!prevAvail[i])return s;
+          return s+(a.type==='예금'?units[i]:(curP[i]??0)*units[i]);
+        },0);
+        const effW=getEffW(avail);
+        assets.forEach((a,i)=>{
+          if(!avail[i]){units[i]=0;return;}
+          const cap=curTotal*effW[i];
+          if(a.type==='예금'){units[i]=cap;return;}
+          if(curP[i])units[i]=cap/curP[i];
+        });
       }
-      const p=getBasePrice(a,priceMaps[i],mn.year,mn.month);
-      return p?units[i]*p:(portValues[mi-1]?.assetVals?.[i]||initAmounts[i]);
+    }
+
+    // 4. 이번 달 자산별 평가액
+    const vals=assets.map((a,i)=>{
+      if(!avail[i])return 0;
+      if(a.type==='예금')return units[i];
+      return units[i]*(curP[i]||0);
     });
     const total=vals.reduce((s,v)=>s+v,0);
     portValues.push({...mn,value:total,assetVals:vals});
-    if(rebalance!=='none'&&mi>0&&mi%rebalPeriod===0){
-      weights.forEach((w,i)=>{
-        const target=total*w;
-        if(assets[i].type==='예금'){units[i]=target;return;}
-        const p=getBasePrice(assets[i],priceMaps[i],mn.year,mn.month);
-        if(p)units[i]=target/p;
+
+    // 5. 정기 리밸런싱 (가용 자산 내에서만)
+    if(rebalance!=='none'&&portValues.length>1&&(portValues.length-1)%rebalPeriod===0){
+      const effW=getEffW(avail);
+      assets.forEach((a,i)=>{
+        if(!avail[i])return;
+        const target=total*effW[i];
+        if(a.type==='예금'){units[i]=target;return;}
+        if(curP[i])units[i]=target/curP[i];
       });
     }
+
+    prevAvail=avail.slice();
   });
 
   if(!portValues.length)return null;
@@ -706,7 +837,6 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
   let peak=portValues[0].value,mdd=0;
   portValues.forEach(p=>{if(p.value>peak)peak=p.value;const dd=(peak-p.value)/peak;if(dd>mdd)mdd=dd;});
 
-  // Annual returns
   const byYear={};
   portValues.forEach(p=>{
     if(!byYear[p.year])byYear[p.year]={start:p.value,end:p.value};
@@ -714,21 +844,20 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
   });
   const annualRetArr=Object.entries(byYear).map(([yr,{start,end}])=>({year:parseInt(yr),ret:(end-start)/start*100}));
 
-  // Correlation
+  // 상관관계 — 두 자산 모두 데이터 있는 구간만 사용
   const assetMRets=assets.map((_,ai)=>{
     const r=[];
     for(let i=1;i<portValues.length;i++){
       const c=portValues[i].assetVals[ai],p=portValues[i-1].assetVals[ai];
-      if(p)r.push((c-p)/p);
+      if(p>0&&c>0)r.push((c-p)/p);
     }
     return r;
   });
   const corrMatrix=assets.map((_,i)=>assets.map((_,j)=>pearsonCorr(assetMRets[i],assetMRets[j])));
 
-  // FX effect
   let fxEffect=null;
-  if(applyFX&&baseCurrency==='KRW'){
-    const fxStart=getFX(cs.year,cs.month);
+  if(applyFX&&baseCurrency==='KRW'&&portfolioCS){
+    const fxStart=getFX(portfolioCS.year,portfolioCS.month);
     const last=portValues[portValues.length-1];
     const fxEnd=getFX(last.year,last.month);
     const fxChange=(fxEnd-fxStart)/fxStart*100;
@@ -736,8 +865,9 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
   }
 
   return{portValues,cagr,annualVol,sharpe,mdd,annualRetArr,corrMatrix,fxEffect,
-    totalReturn:(finalVal-initVal)/initVal*100,initVal,finalVal,commonStart:cs,
-    dataStartNote:cs.year>startYear?`데이터 가용 기간: ${cs.year}년 ${cs.month}월부터`:null};
+    totalReturn:(finalVal-initVal)/initVal*100,initVal,finalVal,commonStart:portfolioCS,
+    dataStartNote:portfolioCS&&(portfolioCS.year>startYear||(portfolioCS.year===startYear&&portfolioCS.month>1))?
+      `데이터 가용 기간: ${portfolioCS.year}년 ${portfolioCS.month}월부터`:null};
 }
 
 // ── Run ────────────────────────────────────────────────────────
@@ -773,8 +903,9 @@ async function runBacktest(){
           updateLoadingStep(i+1,'done');
           return a;
         }
-        const {prices,firstYear,firstMonth} = await fetchMonthlyPrices(a.ticker,startYear,endYear);
+        const {prices,firstYear,firstMonth,proxyNote} = await fetchAndMergePrices(a,startYear,endYear);
         a.prices=prices; a.firstYear=firstYear; a.firstMonth=firstMonth;
+        if(proxyNote) a.proxyNote=proxyNote;
         updateLoadingStep(i+1,'done');
         return a;
       })
@@ -785,10 +916,14 @@ async function runBacktest(){
       const asset = state.assets[i];
       if(result.status==='fulfilled'){
         const a = result.value;
+        if(a.proxyNote){
+          warnings.push(`${a.name}: ${a.proxyNote}`);
+        }
         if(a.firstYear>startYear||(a.firstYear===startYear&&a.firstMonth>1)){
           const n=document.getElementById(`dateNote-${a.id}`);
-          if(n)n.textContent=`※ 데이터 시작: ${a.firstYear}년 ${a.firstMonth}월`;
-          warnings.push(`${a.name}: ${a.firstYear}년 ${a.firstMonth}월부터 데이터 가용`);
+          if(n)n.textContent=`※ ${a.proxyNote?'대체 데이터 포함':'데이터 시작'}: ${a.firstYear}년 ${a.firstMonth}월`;
+          if(!a.proxyNote)
+            warnings.push(`${a.name}: ${a.firstYear}년 ${a.firstMonth}월부터 포함 (이전 기간 타 종목으로 비중 재조정)`);
         }
         assetsWithData.push(a);
       } else {
