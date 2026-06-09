@@ -1,70 +1,13 @@
 """
-KRX 데이터 포털 HTTP API로 KOSPI·KOSDAQ·ETF 전종목을 수집해
-data/kr_stocks.json을 갱신합니다. 로그인 불필요.
+FinanceDataReader로 KOSPI·KOSDAQ·ETF(KR) 전종목을 수집해
+data/kr_stocks.json을 갱신합니다.
 """
 
 import json
 import os
 import sys
-from datetime import datetime, timedelta
 
-import requests
-
-_BASE = 'https://data.krx.co.kr'
-_SESSION = requests.Session()
-_SESSION.headers.update({
-    'User-Agent': (
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/124.0.0.0 Safari/537.36'
-    ),
-    'Referer': _BASE + '/',
-    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-})
-
-
-def _last_business_day() -> str:
-    d = datetime.now()
-    for _ in range(10):
-        if d.weekday() < 5:
-            return d.strftime('%Y%m%d')
-        d -= timedelta(days=1)
-    return datetime.now().strftime('%Y%m%d')
-
-
-def _fetch(bld: str, extra: dict) -> list:
-    """KRX getJsonData.cmd 호출 → 레코드 리스트 반환."""
-    r = _SESSION.post(
-        f'{_BASE}/comm/bldAttendant/getJsonData.cmd',
-        data={'bld': bld, 'csvxls_isNo': 'false', **extra},
-        timeout=30,
-    )
-    r.raise_for_status()
-    body = r.json()
-    # KRX 응답의 데이터 키는 버전마다 다를 수 있으므로 방어적으로 탐색
-    for key in ('OutBlock_1', 'output', 'block1'):
-        if isinstance(body.get(key), list):
-            return body[key]
-    if isinstance(body, list):
-        return body
-    return []
-
-
-def _get_market(date: str, mkt_id: str, mkt_name: str) -> list:
-    """KOSPI(STK) 또는 KOSDAQ(KSQ) 전종목."""
-    rows = _fetch('dbms/MDC/STAT/standard/MDCSTAT01901', {
-        'mktId': mkt_id,
-        'trdDd': date,
-        'money': '1',
-    })
-    out = []
-    for row in rows:
-        ticker = (row.get('ISU_SRT_CD') or row.get('종목코드') or '').strip()
-        name   = (row.get('ISU_ABBRV') or row.get('ISU_NM') or row.get('종목명') or '').strip()
-        sector = (row.get('SECT_TP_NM') or row.get('업종명') or '기타').strip() or '기타'
-        if ticker and name:
-            out.append({'t': f'{ticker}.KS', 'n': name, 'm': mkt_name, 's': sector})
-    return out
+import FinanceDataReader as fdr
 
 
 _ETF_RULES = [
@@ -92,39 +35,51 @@ def _etf_sector(name: str) -> str:
     return 'ETF'
 
 
-def _get_etfs(date: str) -> list:
-    rows = _fetch('dbms/MDC/STAT/standard/MDCSTAT04601', {'trdDd': date})
+def _str(val) -> str:
+    s = str(val).strip()
+    return '' if s in ('', 'nan', 'None') else s
+
+
+def _collect_market(market: str) -> list:
+    df = fdr.StockListing(market)
     out = []
-    for row in rows:
-        ticker = (row.get('ISU_SRT_CD') or row.get('단축코드') or '').strip()
-        name   = (row.get('ISU_ABBRV') or row.get('한글종목약명') or row.get('종목명') or '').strip()
-        # API가 ETF_SECT_NM을 주면 그대로, 없으면 이름 기반 분류
-        sector = (row.get('ETF_SECT_NM') or '').strip() or _etf_sector(name)
+    for _, row in df.iterrows():
+        ticker = _str(row.get('Symbol') or row.get('Code') or '')
+        name   = _str(row.get('Name') or '')
+        sector = _str(row.get('Sector') or row.get('Industry') or '') or '기타'
         if ticker and name:
-            out.append({'t': f'{ticker}.KS', 'n': name, 'm': 'ETF', 's': sector})
+            out.append({'t': f'{ticker}.KS', 'n': name, 'm': market, 's': sector})
+    return out
+
+
+def _collect_etf() -> list:
+    df = fdr.StockListing('ETF/KR')
+    out = []
+    for _, row in df.iterrows():
+        ticker = _str(row.get('Symbol') or row.get('Code') or '')
+        name   = _str(row.get('Name') or '')
+        if ticker and name:
+            out.append({'t': f'{ticker}.KS', 'n': name, 'm': 'ETF', 's': _etf_sector(name)})
     return out
 
 
 def main():
-    date = _last_business_day()
-    print(f'KRX fetch date: {date}')
-
     result = []
 
-    for mkt_id, mkt_name in (('STK', 'KOSPI'), ('KSQ', 'KOSDAQ')):
+    for market in ('KOSPI', 'KOSDAQ'):
         try:
-            stocks = _get_market(date, mkt_id, mkt_name)
-            print(f'[{mkt_name}] {len(stocks)} stocks')
+            stocks = _collect_market(market)
+            print(f'[{market}] {len(stocks)} stocks')
             result.extend(stocks)
         except Exception as exc:
-            print(f'[{mkt_name}] ERROR: {exc}', file=sys.stderr)
+            print(f'[{market}] ERROR: {exc}', file=sys.stderr)
 
     try:
-        etfs = _get_etfs(date)
-        print(f'[ETF] {len(etfs)} ETFs')
+        etfs = _collect_etf()
+        print(f'[ETF/KR] {len(etfs)} ETFs')
         result.extend(etfs)
     except Exception as exc:
-        print(f'[ETF] ERROR: {exc}', file=sys.stderr)
+        print(f'[ETF/KR] ERROR: {exc}', file=sys.stderr)
 
     if not result:
         print('No data fetched — aborting to preserve existing file.', file=sys.stderr)

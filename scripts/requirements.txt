@@ -1,1 +1,1 @@
-requests
+finance-datareader
