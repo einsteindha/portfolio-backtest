@@ -1164,6 +1164,19 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
       <div style="font-size:.85rem;color:var(--text3);font-family:var(--mono)">${periodStr}</div>
       ${warnHTML}
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:1.25rem">
+      <div class="chart-section" style="margin-bottom:0">
+        <div class="chart-header"><div class="chart-title">수익-위험 지도</div></div>
+        <div style="font-size:.75rem;color:var(--text3);margin-bottom:.5rem">백테스트 기간 전체 기준 연평균 수익률 vs 연환산 변동성</div>
+        <div style="position:relative;width:100%;height:280px"><canvas id="riskReturnChart"></canvas></div>
+        <div id="riskReturnLegend" style="display:flex;flex-wrap:wrap;gap:.4rem .75rem;margin-top:.75rem;font-size:.72rem;color:var(--text2)"></div>
+      </div>
+      <div class="chart-section" style="margin-bottom:0">
+        <div class="chart-header"><div class="chart-title">자산군 구성</div></div>
+        <div style="font-size:.75rem;color:var(--text3);margin-bottom:.5rem">초기 투자금액 기준 자산군별 비중</div>
+        <div style="position:relative;width:100%;height:280px"><canvas id="assetClassChart"></canvas></div>
+      </div>
+    </div>
     <div class="metric-grid">
       <div class="metric-card"><div class="metric-label">CAGR</div>${dualV(pct(r.cagr),r.cagr>=0?'positive':'negative',pct(sec?.cagr??0),(sec?.cagr??0)>=0?'positive':'negative')}<div class="metric-sub">연평균 복리 수익률</div>${cNote}</div>
       <div class="metric-card"><div class="metric-label">MDD</div>${dualV('-'+(r.mdd*100).toFixed(2)+'%','negative','-'+((sec?.mdd??0)*100).toFixed(2)+'%','negative')}<div class="metric-sub">최대낙폭${r.mddDate?` · 발생: ${r.mddDate.year}.${String(r.mddDate.month).padStart(2,'0')}`:''}
@@ -1178,19 +1191,6 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
     <div class="chart-section">
       <div class="chart-header"><div class="chart-title">연도별 수익률</div></div>
       <div class="annual-grid">${annualHTML}</div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:1.25rem">
-      <div class="chart-section" style="margin-bottom:0">
-        <div class="chart-header"><div class="chart-title">수익-위험 지도</div></div>
-        <div style="font-size:.75rem;color:var(--text3);margin-bottom:.5rem">백테스트 기간 전체 기준 연평균 수익률 vs 연환산 변동성</div>
-        <div style="position:relative;width:100%;height:280px"><canvas id="riskReturnChart"></canvas></div>
-        <div id="riskReturnLegend" style="display:flex;flex-wrap:wrap;gap:.4rem .75rem;margin-top:.75rem;font-size:.72rem;color:var(--text2)"></div>
-      </div>
-      <div class="chart-section" style="margin-bottom:0">
-        <div class="chart-header"><div class="chart-title">자산군 구성</div></div>
-        <div style="font-size:.75rem;color:var(--text3);margin-bottom:.5rem">초기 투자금액 기준 자산군별 비중</div>
-        <div style="position:relative;width:100%;height:280px"><canvas id="assetClassChart"></canvas></div>
-      </div>
     </div>
     ${assets.length>1?`<div class="chart-section"><div class="chart-header"><div class="chart-title">자산 간 상관관계</div></div><div style="font-size:.78rem;color:var(--text3);margin-bottom:.5rem">백테스트 기간 월별 수익률 기반 피어슨 상관계수</div>${corrHTML}</div>`:''}
     ${fxHTML}
