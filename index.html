@@ -697,7 +697,7 @@ async function fetchFXData(startYear,endYear){
 }
 
 // ETF 상장 전 기간을 대체 데이터로 연장
-async function fetchAndMergePrices(asset,startYear,endYear){
+async function fetchAndMergePrices(asset,startYear,endYear,fxPrices){
   const actual = await fetchMonthlyPrices(asset.ticker,startYear,endYear);
   const proxyInfo = getProxyForAsset(asset);
 
@@ -719,10 +719,28 @@ async function fetchAndMergePrices(asset,startYear,endYear){
     const etfFirst = actual.prices[0].price;
     const pxFirst  = proxyAtListing.price;
 
+    // USD 프록시 + KRW ETF 조합이면 전달받은 환율 데이터로 합성 가격 보정
+    const isUSDProxy = !proxyInfo.proxy.startsWith('^');
+    const isKRWetf   = asset.ticker.endsWith('.KS');
+    const fxMap = {};
+    if(isUSDProxy && isKRWetf && fxPrices){
+      // 유효 범위(800~2000) 벗어난 오염 데이터 제거
+      fxPrices.forEach(p=>{ if(p.price>=800&&p.price<=2000) fxMap[`${p.year}-${p.month}`]=p.price; });
+    }
+    const getFXAt=(y,m)=>fxMap[`${y}-${m}`]??fxMap[`${y}-${m-1}`]??null;
+
+    // 상장월 환율이 있어야만 FX 보정 적용 — 없으면 기존 달러 수익률 방식 유지
+    const fxListing = (isUSDProxy&&isKRWetf) ? getFXAt(listY,listM) : null;
+
     // 상장 전 기간의 합성 가격 생성
-    const synthetic = proxyRaw.prices
-      .filter(p=>p.year<listY||(p.year===listY&&p.month<listM))
-      .map(p=>({year:p.year,month:p.month,price:(p.price/pxFirst)*etfFirst}));
+    const preFilter = proxyRaw.prices.filter(p=>p.year<listY||(p.year===listY&&p.month<listM));
+    const synthetic = preFilter.map(p=>{
+      if(fxListing!==null){
+        const fxT = getFXAt(p.year,p.month) ?? fxListing;
+        return {year:p.year,month:p.month,price:(p.price*fxT)/(pxFirst*fxListing)*etfFirst};
+      }
+      return {year:p.year,month:p.month,price:(p.price/pxFirst)*etfFirst};
+    });
 
     if(!synthetic.length) return {...actual, proxyNote:null};
 
@@ -983,7 +1001,7 @@ async function runBacktest(){
           updateLoadingStep(i+1,'done');
           return a;
         }
-        const {prices,firstYear,firstMonth,proxyNote} = await fetchAndMergePrices(a,startYear,endYear);
+        const {prices,firstYear,firstMonth,proxyNote} = await fetchAndMergePrices(a,startYear,endYear,fxData);
         a.prices=prices; a.firstYear=firstYear; a.firstMonth=firstMonth;
         if(proxyNote) a.proxyNote=proxyNote;
         updateLoadingStep(i+1,'done');
