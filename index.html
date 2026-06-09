@@ -73,6 +73,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .amount-input:focus{border-color:var(--border2)}
 .currency-select{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.45rem .5rem;font-size:.8rem;font-family:var(--sans);color:var(--text);outline:none;cursor:pointer}
 .asset-note{font-size:.7rem;color:var(--text3);margin-top:.35rem}
+.unit-label{font-size:.72rem;color:var(--amber);font-family:var(--mono);min-height:.9rem;margin-top:.2rem}
 .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
 .field{display:flex;flex-direction:column}
 .field-input{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:.55rem .65rem;font-size:.85rem;font-family:var(--mono);color:var(--text);outline:none;transition:border-color .15s;width:100%}
@@ -261,6 +262,31 @@ let KR_STOCKS = [{"t":"005930.KS","n":"삼성전자","m":"KOSPI","s":"반도체"
 // Async-replace seed data with the latest JSON (GitHub Actions updates this weekly)
 fetch('data/kr_stocks.json').then(r=>r.ok?r.json():null).then(d=>{ if(d&&d.length) KR_STOCKS=d; }).catch(()=>{});
 
+// ── Korean unit formatter ──────────────────────────────────────
+function formatKoreanUnit(val, currency) {
+  const n = parseFloat(val);
+  if (!n || n <= 0) return '';
+  if (currency === 'USD') {
+    if (n >= 10000) return `약 ${+(n / 10000).toFixed(1)}만 달러`;
+    if (n >= 1000)  return `약 ${+(n / 1000).toFixed(1)}천 달러`;
+    return `약 ${Math.round(n).toLocaleString()} 달러`;
+  }
+  // KRW
+  const eok = Math.floor(n / 1e8);
+  const man  = Math.floor((n % 1e8) / 1e4);
+  if (eok > 0) {
+    if (man === 0) return `${eok}억원`;
+    if (man >= 1000) return `${eok}억 ${Math.floor(man / 1000)}천만원`;
+    return `${eok}억 ${man}만원`;
+  }
+  if (man >= 1000) {
+    const c = Math.floor(man / 1000), r = man % 1000;
+    return r > 0 ? `${c}천${r}만원` : `${c}천만원`;
+  }
+  if (man > 0) return `${man}만원`;
+  return `${Math.round(n).toLocaleString()}원`;
+}
+
 // ── State ──────────────────────────────────────────────────────
 const state = { assets:[], idCounter:0 };
 
@@ -287,7 +313,7 @@ function onSearchInput(q){
   // Search KR_STOCKS
   const ql = q.toLowerCase();
   const matches = KR_STOCKS.filter(s=>
-    s.n.includes(q) ||
+    s.n.toLowerCase().includes(ql) ||
     s.t.toLowerCase().includes(ql) ||
     s.t.replace('.KS','').replace('.KS','').toLowerCase() === ql
   ).slice(0,8);
@@ -418,20 +444,31 @@ function renderAssetList(){
       </div>
       <div class="asset-amount-row">
         <input class="amount-input" type="number" placeholder="투자금액" value="${a.amount||''}"
-          onchange="updateAmount(${a.id},this.value)" min="0">
+          oninput="updateAmount(${a.id},this.value)" min="0">
         <select class="currency-select" onchange="updateCurrency(${a.id},this.value)">
           <option value="KRW" ${a.currency==='KRW'?'selected':''}>KRW</option>
           <option value="USD" ${a.currency==='USD'?'selected':''}>USD</option>
         </select>
       </div>
+      <div class="unit-label" id="unitLabel-${a.id}">${formatKoreanUnit(a.amount, a.currency)}</div>
       ${a.unverified?`<div class="asset-note">⚠ 티커 미검증 — 데이터가 없으면 백테스트에서 제외됩니다</div>`:''}
       <div class="asset-note" id="dateNote-${a.id}"></div>
     </div>`;
   }).join('');
   updateTotal();
 }
-function updateAmount(id,val){const a=state.assets.find(x=>x.id===id);if(a)a.amount=parseFloat(val)||0;updateTotal();}
-function updateCurrency(id,val){const a=state.assets.find(x=>x.id===id);if(a)a.currency=val;}
+function updateAmount(id,val){
+  const a=state.assets.find(x=>x.id===id);
+  if(a){a.amount=parseFloat(val)||0;updateTotal();}
+  const el=document.getElementById(`unitLabel-${id}`);
+  if(el&&a)el.textContent=formatKoreanUnit(a.amount,a.currency);
+}
+function updateCurrency(id,val){
+  const a=state.assets.find(x=>x.id===id);
+  if(a){a.currency=val;}
+  const el=document.getElementById(`unitLabel-${id}`);
+  if(el&&a)el.textContent=formatKoreanUnit(a.amount,a.currency);
+}
 function updateTotal(){
   const base=document.getElementById('baseCurrency').value;
   let total=0;
