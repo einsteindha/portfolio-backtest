@@ -880,6 +880,13 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
     const pm={};
     if(a.type==='예금')return pm;
     (a.prices||[]).forEach(p=>{pm[`${p.year}-${p.month}`]=p.price;});
+    // 데이터 공백 forward-fill: 첫 데이터 이후 빈 월은 직전 가격으로 채움
+    let last=null;
+    months.forEach(mn=>{
+      const k=`${mn.year}-${mn.month}`;
+      if(pm[k])last=pm[k];
+      else if(last!==null)pm[k]=last;
+    });
     return pm;
   });
 
