@@ -702,7 +702,7 @@ async function fetchAndMergePrices(asset,startYear,endYear){
   const proxyInfo = getProxyForAsset(asset);
 
   // 프록시 불필요 or 실제 데이터가 startYear 이미 커버
-  if(!proxyInfo || actual.firstYear>=startYear){
+  if(!proxyInfo || actual.firstYear<=startYear){
     return {...actual, proxyNote:null};
   }
 
@@ -915,13 +915,17 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
   });
   const annualRetArr=Object.entries(byYear).map(([yr,{start,end}])=>({year:parseInt(yr),ret:(end-start)/start*100}));
 
-  // 상관관계: 두 자산 모두 데이터 있는 구간만, 12개월 미만이면 null
+  // 상관관계: assetVals 대신 raw price 기반으로 계산 (리밸런싱 오염 방지)
   const corrMatrix=assets.map((_,i)=>assets.map((_,j)=>{
     if(i===j)return 1;
+    if(assets[i].type==='예금'||assets[j].type==='예금')return null;
     const ri=[],rj=[];
-    for(let k=1;k<portValues.length;k++){
-      const ci=portValues[k].assetVals[i],pi=portValues[k-1].assetVals[i];
-      const cj=portValues[k].assetVals[j],pj=portValues[k-1].assetVals[j];
+    for(let k=1;k<months.length;k++){
+      const mn=months[k],prev=months[k-1];
+      const ci=getBasePrice(assets[i],priceMaps[i],mn.year,mn.month);
+      const pi=getBasePrice(assets[i],priceMaps[i],prev.year,prev.month);
+      const cj=getBasePrice(assets[j],priceMaps[j],mn.year,mn.month);
+      const pj=getBasePrice(assets[j],priceMaps[j],prev.year,prev.month);
       if(pi>0&&ci>0&&pj>0&&cj>0){ri.push((ci-pi)/pi);rj.push((cj-pj)/pj);}
     }
     if(ri.length<12)return null;
