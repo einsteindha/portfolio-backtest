@@ -769,15 +769,16 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
   if(fxData) fxData.forEach(d=>{fxMap[`${d.year}-${d.month}`]=d.price;});
   const getFX=(y,m)=>fxMap[`${y}-${m}`]||fxMap[`${y}-${m-1}`]||1350;
 
-  // Full month list from startYear (per-asset data 있는 기간만 참여)
-  const months2=[];
+  // 전체 월 목록
+  const months=[];
   for(let y=startYear,m=1;;){
-    months2.push({year:y,month:m});
+    months.push({year:y,month:m});
     if(y===endYear&&m===12)break;
     m++;if(m>12){m=1;y++;}
   }
-  if(!months2.length)return null;
+  if(!months.length)return null;
 
+  // 자산별 가격맵
   const priceMaps=assets.map(a=>{
     const pm={};
     if(a.type==='예금')return pm;
@@ -793,7 +794,7 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
     return p;
   };
 
-  // 목표 비중 (초기 투자금액 기준)
+  // 목표 비중 (초기 투자금액 기준, 정규화)
   const initAmounts=assets.map(a=>{
     let amt=Number(a.amount)||0;
     if(!applyFX)return amt;
@@ -803,101 +804,99 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
     return amt;
   });
   const totalInit=initAmounts.reduce((s,v)=>s+v,0)||1;
-  const targetW=initAmounts.map(v=>v/totalInit); // 고정 목표 비중
+  const targetW=initAmounts.map(v=>v/totalInit);
 
-  // 실제 가용 자산의 비중 정규화 헬퍼
-  const getEffW=avail=>{
-    const sumW=targetW.reduce((s,w,i)=>s+(avail[i]?w:0),0)||1;
-    return targetW.map((w,i)=>avail[i]?w/sumW:0);
+  // 가용 자산 내 목표비중 정규화
+  const getEffW=mask=>{
+    const sum=targetW.reduce((s,w,i)=>s+(mask[i]?w:0),0)||1;
+    return targetW.map((w,i)=>mask[i]?w/sum:0);
   };
 
-  let units=assets.map(()=>0);
-  let prevAvail=assets.map(()=>false);
-  let initialized=false;
+  const N=assets.length;
+  const units=new Array(N).fill(0);
+  const active=new Array(N).fill(false); // 매수 완료 여부 (한 번 true면 영구)
   let portfolioCS=null;
-
   const portValues=[];
   const rebalPeriod=rebalance==='monthly'?1:rebalance==='quarterly'?3:rebalance==='annually'?12:999999;
 
-  months2.forEach((mn,mi)=>{
-    // 1. 예금 누적 수익 (직전 월 값 기준)
+  months.forEach((mn,mi)=>{
+    // 1. 예금 월 이자 적립 (이미 매수된 예금만)
     if(mi>0){
       assets.forEach((a,i)=>{
-        if(a.type!=='예금'||!prevAvail[i])return;
-        const r=a.compound==='monthly'?a.rate/100/12:a.compound==='annual'?Math.pow(1+a.rate/100,1/12)-1:a.rate/100/12;
+        if(a.type!=='예금'||!active[i])return;
+        const r=a.compound==='monthly'?a.rate/100/12
+          :a.compound==='annual'?Math.pow(1+a.rate/100,1/12)-1
+          :a.rate/100/12;
         units[i]*=(1+r);
       });
     }
 
-    // 2. 이번 달 가격 & 가용 여부
+    // 2. 이번 달 가격 & 데이터 가용 여부
     const curP=assets.map((a,i)=>a.type==='예금'?null:getBasePrice(a,priceMaps[i],mn.year,mn.month));
     const avail=assets.map((a,i)=>a.type==='예금'||curP[i]!==null);
     if(!avail.some(Boolean))return;
 
-    // 3. 최초 초기화 또는 신규 자산 편입 시 재조정
-    if(!initialized){
+    // 3. 포트폴리오 최초 초기화
+    if(!portfolioCS){
       portfolioCS=mn;
-      const effW=getEffW(avail);
       assets.forEach((a,i)=>{
-        if(!avail[i]){units[i]=0;return;}
-        const cap=totalInit*effW[i];
-        if(a.type==='예금'){units[i]=cap;return;}
-        units[i]=curP[i]?cap/curP[i]:0;
+        if(!avail[i])return;
+        // 각 자산 고유 배분액 = totalInit × targetW[i] (정규화 없음)
+        const cap=totalInit*targetW[i];
+        if(a.type==='예금'){units[i]=cap;}
+        else if(curP[i]){units[i]=cap/curP[i];}
+        active[i]=true;
       });
-      initialized=true;
     } else {
-      // 신규 자산: units===0 인 자산이 이번 달 처음 데이터를 얻은 경우
-      // (임시 데이터 공백 후 복귀한 자산은 units>0 이므로 제외)
-      const newlyAvail=avail.map((v,i)=>v&&units[i]===0);
-      if(newlyAvail.some(Boolean)){
-        // 기존 보유 자산(units>0) 평가 총액
-        const curTotal=assets.reduce((s,a,i)=>{
-          if(!avail[i]||newlyAvail[i])return s;
+      // 4. 신규 자산 편입: active===false 인 자산이 이번 달 처음 데이터를 얻은 경우
+      const newOnes=avail.map((v,i)=>v&&!active[i]);
+      if(newOnes.some(Boolean)){
+        // 현재 포트폴리오 총액 (이미 매수된 자산만)
+        const portTotal=assets.reduce((s,a,i)=>{
+          if(!active[i])return s;
           return s+(a.type==='예금'?units[i]:(curP[i]??0)*units[i]);
         },0);
-        // 신규 자산들의 목표비중 합 (원래 targetW 그대로 사용)
-        const newW=newlyAvail.reduce((s,isNew,i)=>s+(isNew?targetW[i]:0),0);
-        // 기존 자산에서 비례 차감 (각 자산 균등 비율로)
-        if(curTotal>0&&newW>0){
-          const cut=Math.min(newW,1);
-          assets.forEach((_,j)=>{
-            if(avail[j]&&!newlyAvail[j])units[j]*=(1-cut);
-          });
+        // 신규 자산들의 목표비중 합
+        const newTotalW=newOnes.reduce((s,isNew,i)=>s+(isNew?targetW[i]:0),0);
+        const cut=Math.min(newTotalW,1);
+        // 기존 자산 비례 차감
+        if(portTotal>0&&cut>0){
+          assets.forEach((_,j)=>{if(active[j])units[j]*=(1-cut);});
         }
-        // 신규 자산 매수: 총액 × 해당 자산 목표비중
-        newlyAvail.forEach((isNew,i)=>{
+        // 신규 자산 매수: 포트폴리오 총액 × 해당 자산 목표비중
+        newOnes.forEach((isNew,i)=>{
           if(!isNew)return;
-          const cap=curTotal*targetW[i];
+          const cap=portTotal*targetW[i];
           const a=assets[i];
-          if(a.type==='예금'){units[i]=cap;return;}
-          if(curP[i])units[i]=cap/curP[i];
+          if(a.type==='예금'){units[i]=cap;}
+          else if(curP[i]){units[i]=cap/curP[i];}
+          active[i]=true;
         });
       }
     }
 
-    // 4. 이번 달 자산별 평가액
+    // 5. 이번 달 자산별 평가액 (매수 완료 & 데이터 있는 자산만)
     const vals=assets.map((a,i)=>{
-      if(!avail[i])return 0;
-      if(a.type==='예금')return units[i];
-      return units[i]*(curP[i]||0);
+      if(!active[i]||!avail[i])return 0;
+      return a.type==='예금'?units[i]:units[i]*(curP[i]||0);
     });
     const total=vals.reduce((s,v)=>s+v,0);
     portValues.push({...mn,value:total,assetVals:vals});
 
-    // 5. 정기 리밸런싱 (가용 자산 내에서만)
+    // 6. 정기 리밸런싱 (매수 완료 & 데이터 있는 자산끼리만)
     if(rebalance!=='none'&&portValues.length>1&&(portValues.length-1)%rebalPeriod===0){
-      const effW=getEffW(avail);
+      const mask=assets.map((_,i)=>active[i]&&avail[i]);
+      const effW=getEffW(mask);
       assets.forEach((a,i)=>{
-        if(!avail[i])return;
+        if(!mask[i])return;
         const target=total*effW[i];
         if(a.type==='예금'){units[i]=target;return;}
         if(curP[i])units[i]=target/curP[i];
       });
     }
-
-    prevAvail=avail.slice();
   });
 
+  // ── 통계 계산 ──────────────────────────────────────────────────
   if(!portValues.length)return null;
   const initVal=portValues[0].value,finalVal=portValues[portValues.length-1].value;
   const yrs=portValues.length/12;
@@ -923,7 +922,7 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
   });
   const annualRetArr=Object.entries(byYear).map(([yr,{start,end}])=>({year:parseInt(yr),ret:(end-start)/start*100}));
 
-  // 상관관계 — 두 자산 모두 데이터 있는 구간(겹치는 월)만 사용, 12개월 미만이면 null
+  // 상관관계: 두 자산 모두 데이터 있는 구간만, 12개월 미만이면 null
   const corrMatrix=assets.map((_,i)=>assets.map((_,j)=>{
     if(i===j)return 1;
     const ri=[],rj=[];
