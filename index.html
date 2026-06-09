@@ -109,9 +109,14 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:2rem}
 .metric-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1rem 1.1rem}
 .metric-label{font-size:.72rem;color:var(--text3);letter-spacing:.05em;margin-bottom:.35rem}
-.metric-value{font-size:1.4rem;font-weight:500;font-family:var(--mono);color:var(--text)}
+.metric-value{font-size:1.4rem;font-weight:500;font-family:var(--mono);color:var(--text);line-height:1.1}
 .metric-value.positive{color:var(--green)}
 .metric-value.negative{color:var(--red)}
+.metric-value2{font-size:1.05rem;font-weight:500;font-family:var(--mono);color:var(--text2)}
+.metric-value2.positive{color:var(--green)}
+.metric-value2.negative{color:var(--red)}
+.metric-dual{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;margin-bottom:.05rem}
+.metric-sep{color:var(--text3);font-size:.8rem}
 .metric-sub{font-size:.72rem;color:var(--text3);margin-top:.2rem}
 .chart-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem 1.5rem;margin-bottom:1.25rem}
 .chart-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;flex-wrap:wrap;gap:.5rem}
@@ -732,6 +737,23 @@ async function fetchAndMergePrices(asset,startYear,endYear){
   }
 }
 
+// ── Metrics helper ─────────────────────────────────────────────
+function computeMetrics(pv){
+  if(!pv||pv.length<2)return null;
+  const iv=pv[0].value,fv=pv[pv.length-1].value;
+  const yrs=pv.length/12;
+  const cagr=yrs>0?(Math.pow(fv/iv,1/yrs)-1)*100:0;
+  const mr=[];
+  for(let i=1;i<pv.length;i++)mr.push((pv[i].value-pv[i-1].value)/pv[i-1].value);
+  const avg=mr.reduce((s,v)=>s+v,0)/(mr.length||1);
+  const mv=Math.sqrt(mr.reduce((s,v)=>s+(v-avg)**2,0)/(mr.length||1));
+  const vol=mv*Math.sqrt(12)*100;
+  const sharpe=mv>0?(avg-0.03/12)/mv*Math.sqrt(12):0;
+  let pk=pv[0].value,mdd=0;
+  pv.forEach(p=>{if(p.value>pk)pk=p.value;const d=(pk-p.value)/pk;if(d>mdd)mdd=d;});
+  return{cagr,vol,sharpe,mdd};
+}
+
 // ── Backtest engine ────────────────────────────────────────────
 function pearsonCorr(a,b){
   const n=Math.min(a.length,b.length);if(!n)return 0;
@@ -1027,7 +1049,24 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
   let corrHTML=`<div class="corr-wrapper"><table class="corr-table"><tr><th></th>${corrHeaders.map(h=>`<th>${h}</th>`).join('')}</tr>`;
   assets.forEach((_,i)=>{corrHTML+=`<tr><th>${corrHeaders[i]}</th>`;assets.forEach((_,j)=>{const v=r.corrMatrix[i][j];if(i===j){corrHTML+=`<td style="background:var(--surface2);color:var(--text2)">1.00</td>`;}else if(v===null){corrHTML+=`<td style="color:var(--text3)">N/A</td>`;}else{const c=corrColor(v);corrHTML+=`<td style="background:${c.bg};color:${c.fg}">${v.toFixed(2)}</td>`;}});corrHTML+=`</tr>`;});
   corrHTML+='</table></div>';
-  const fxHTML=(applyFX&&r.fxEffect)?`<div class="chart-section"><div class="chart-header"><div class="chart-title">환율 영향 분리</div></div><div class="fx-grid"><div class="metric-card"><div class="metric-label">포트폴리오 전체 수익</div><div class="metric-value ${r.totalReturn>=0?'positive':'negative'}">${pct(r.totalReturn)}</div><div class="metric-sub">FX 포함 누적 총수익률</div></div><div class="metric-card"><div class="metric-label">환율 변동 기여</div><div class="metric-value ${r.fxEffect.fxChange>=0?'positive':'negative'}">${pct(r.fxEffect.fxChange)}</div><div class="metric-sub">KRW/USD 환율 변화 효과</div></div><div class="metric-card"><div class="metric-label">로컬 수익 (환율 제외)</div><div class="metric-value ${r.fxEffect.localReturn>=0?'positive':'negative'}">${pct(r.fxEffect.localReturn)}</div><div class="metric-sub">순수 자산가격 변동 기여</div></div></div></div>`:'';
+  // 환율 섹션: USD 자산이 있을 때만 표시
+  const hasUSD=assets.some(a=>a.currency==='USD');
+  const fxHTML=(applyFX&&r.fxEffect&&hasUSD)?`<div class="chart-section"><div class="chart-header"><div class="chart-title">환율 영향 분리</div></div><div class="fx-grid"><div class="metric-card"><div class="metric-label">포트폴리오 전체 수익</div><div class="metric-value ${r.totalReturn>=0?'positive':'negative'}">${pct(r.totalReturn)}</div><div class="metric-sub">FX 포함 누적 총수익률</div></div><div class="metric-card"><div class="metric-label">환율 변동 기여</div><div class="metric-value ${r.fxEffect.fxChange>=0?'positive':'negative'}">${pct(r.fxEffect.fxChange)}</div><div class="metric-sub">KRW/USD 환율 변화 효과</div></div><div class="metric-card"><div class="metric-label">로컬 수익 (환율 제외)</div><div class="metric-value ${r.fxEffect.localReturn>=0?'positive':'negative'}">${pct(r.fxEffect.localReturn)}</div><div class="metric-sub">순수 자산가격 변동 기여</div></div></div></div>`:'';
+
+  // 공통 기간: 가장 늦게 시작하는 종목의 시작월
+  let latestFirst={year:r.commonStart.year,month:r.commonStart.month};
+  assets.forEach(a=>{
+    const ay=a.firstYear||r.commonStart.year,am=a.firstMonth||r.commonStart.month;
+    if(ay*12+am>latestFirst.year*12+latestFirst.month)latestFirst={year:ay,month:am};
+  });
+  const isSame=latestFirst.year===r.commonStart.year&&latestFirst.month===r.commonStart.month;
+  const commonPV=isSame?null:r.portValues.filter(p=>p.year*12+p.month>=latestFirst.year*12+latestFirst.month);
+  const sec=isSame?null:computeMetrics(commonPV);
+  const cStr=`${latestFirst.year}.${String(latestFirst.month).padStart(2,'0')}`;
+  const cNote=isSame?'':'<div style="font-size:.65rem;color:var(--text3);margin-top:.25rem">공통 기간: '+cStr+'~</div>';
+  const dualV=(fv,fc,cv,cc)=>isSame||!sec
+    ?`<div class="metric-value ${fc}">${fv}</div>`
+    :`<div class="metric-dual"><span class="metric-value ${fc}">${fv}</span><span class="metric-sep">/</span><span class="metric-value2 ${cc}">${cv}</span></div>`;
 
   document.getElementById('resultsArea').innerHTML=`
     <div style="margin-bottom:1.75rem">
@@ -1036,11 +1075,11 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
       ${warnHTML}
     </div>
     <div class="metric-grid">
-      <div class="metric-card"><div class="metric-label">CAGR</div><div class="metric-value ${r.cagr>=0?'positive':'negative'}">${pct(r.cagr)}</div><div class="metric-sub">연평균 복리 수익률</div></div>
-      <div class="metric-card"><div class="metric-label">MDD</div><div class="metric-value negative">-${(r.mdd*100).toFixed(2)}%</div><div class="metric-sub">최대낙폭${r.mddDate?` · 발생: ${r.mddDate.year}.${String(r.mddDate.month).padStart(2,'0')}`:''}
-</div></div>
-      <div class="metric-card"><div class="metric-label">샤프지수</div><div class="metric-value ${r.sharpe>=0?'positive':'negative'}">${r.sharpe.toFixed(2)}</div><div class="metric-sub">위험 대비 수익 (RF 3%)</div></div>
-      <div class="metric-card"><div class="metric-label">연환산 변동성</div><div class="metric-value">${r.annualVol.toFixed(2)}%</div><div class="metric-sub">표준편차</div></div>
+      <div class="metric-card"><div class="metric-label">CAGR</div>${dualV(pct(r.cagr),r.cagr>=0?'positive':'negative',pct(sec?.cagr??0),(sec?.cagr??0)>=0?'positive':'negative')}<div class="metric-sub">연평균 복리 수익률</div>${cNote}</div>
+      <div class="metric-card"><div class="metric-label">MDD</div>${dualV('-'+(r.mdd*100).toFixed(2)+'%','negative','-'+((sec?.mdd??0)*100).toFixed(2)+'%','negative')}<div class="metric-sub">최대낙폭${r.mddDate?` · 발생: ${r.mddDate.year}.${String(r.mddDate.month).padStart(2,'0')}`:''}
+</div>${cNote}</div>
+      <div class="metric-card"><div class="metric-label">샤프지수</div>${dualV(r.sharpe.toFixed(2),r.sharpe>=0?'positive':'negative',(sec?.sharpe??0).toFixed(2),(sec?.sharpe??0)>=0?'positive':'negative')}<div class="metric-sub">위험 대비 수익 (RF 3%)</div>${cNote}</div>
+      <div class="metric-card"><div class="metric-label">연환산 변동성</div>${dualV(r.annualVol.toFixed(2)+'%','',( sec?.vol??0).toFixed(2)+'%','')}<div class="metric-sub">표준편차</div>${cNote}</div>
     </div>
     <div class="chart-section">
       <div class="chart-header"><div class="chart-title">누적 수익률</div><div class="chart-legend" id="mainLegend"></div></div>
