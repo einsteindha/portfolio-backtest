@@ -42,7 +42,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .search-btn:hover{opacity:.8}
 .search-btn:disabled{opacity:.4;cursor:default}
 .search-hint{font-size:.72rem;color:var(--text3);margin-bottom:.5rem;line-height:1.5}
-.search-results{background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-lg);max-height:288px;overflow-y:auto;margin-bottom:.75rem;box-shadow:0 4px 16px rgba(0,0,0,.08)}
+.search-results{background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-lg);max-height:400px;overflow-y:auto;margin-bottom:.75rem;box-shadow:0 4px 16px rgba(0,0,0,.08)}
 .search-result-item{padding:.65rem 1rem;cursor:pointer;border-bottom:1px solid var(--border);transition:background .1s;display:flex;justify-content:space-between;align-items:center}
 .search-result-item:last-child{border-bottom:none}
 .search-result-item:hover{background:var(--surface2)}
@@ -394,16 +394,17 @@ const state = { assets:[], idCounter:0 };
 })();
 
 // ── Unified search (KR + US) ───────────────────────────────────
-// 정렬 우선순위: 완전일치+주식(0) > 시작+주식(1) > 시작+ETF(2) > 포함+주식(3) > 포함+ETF(4) > 티커(5)
+// 종목명 완전일치(0/1) > 티커 완전일치(2/3) > 종목명 앞일치(4/5) > 종목명 포함(6/7) > 티커 포함(8)
+// 각 단계에서 개별주식(짝수) > ETF(홀수)
 function _rank(s, ql) {
   const nl = s.n.toLowerCase();
-  const isETF = s.m === 'ETF';
-  if (nl === ql && !isETF)         return 0;
-  if (nl.startsWith(ql) && !isETF) return 1;
-  if (nl.startsWith(ql) && isETF)  return 2;
-  if (nl.includes(ql) && !isETF)   return 3;
-  if (nl.includes(ql) && isETF)    return 4;
-  return 5;
+  const tl = s.t.toLowerCase().replace('.ks', '');
+  const e = s.m === 'ETF' ? 1 : 0;
+  if (nl === ql)         return 0 + e;
+  if (tl === ql)         return 2 + e;
+  if (nl.startsWith(ql)) return 4 + e;
+  if (nl.includes(ql))   return 6 + e;
+  return 8;
 }
 
 function onSearchInput(q){
@@ -411,34 +412,23 @@ function onSearchInput(q){
   if(!q){ clearResults(); return; }
   const ql = q.toLowerCase();
   const hasKorean = /[가-힣]/.test(q);
+  const limit = ql.length <= 2 ? 10 : 30;
 
-  // KR search — always run
-  const krMatches = KR_STOCKS.filter(s=>
-    s.n.toLowerCase().includes(ql) ||
-    s.t.toLowerCase().includes(ql) ||
-    s.t.replace('.KS','').toLowerCase() === ql
-  ).sort((a,b)=>_rank(a,ql)-_rank(b,ql)).slice(0, hasKorean ? 8 : 5);
-
-  // US search — only for non-Korean queries
-  const usMatches = hasKorean ? [] : US_STOCKS.filter(s=>{
+  const pool = hasKorean ? KR_STOCKS : [...KR_STOCKS, ...US_STOCKS];
+  const combined = pool.filter(s=>{
+    const nl = s.n.toLowerCase();
     const tl = s.t.toLowerCase();
-    return s.n.toLowerCase().includes(ql) ||
-           tl === ql ||
-           (ql.length >= 2 && tl.startsWith(ql));
-  }).sort((a,b)=>_rank(a,ql)-_rank(b,ql)).slice(0, 5);
-
-  const combined = [...krMatches, ...usMatches].slice(0, 8);
+    const tlb = tl.replace('.ks','');
+    return nl.includes(ql) || tlb === ql || tl === ql ||
+           (ql.length >= 2 && tlb.startsWith(ql));
+  }).sort((a,b)=>_rank(a,ql)-_rank(b,ql)).slice(0, limit);
 
   if(combined.length){
     renderSearchResults(combined);
-    const hint = krMatches.length && usMatches.length
-      ? `국내 ${krMatches.length}건 · 해외 ${usMatches.length}건`
-      : krMatches.length ? '국내 종목 검색 결과'
-      : '해외 종목 검색 결과';
-    document.getElementById('searchHint').textContent = hint;
+    document.getElementById('searchHint').innerHTML = `검색 결과 ${combined.length}건`;
   } else {
     clearResults();
-    document.getElementById('searchHint').textContent =
+    document.getElementById('searchHint').innerHTML =
       '검색 결과 없음 — 미국 종목 티커를 직접 입력하고 [추가]를 누르세요';
   }
 }
