@@ -394,13 +394,16 @@ const state = { assets:[], idCounter:0 };
 })();
 
 // ── Unified search (KR + US) ───────────────────────────────────
-// 정렬 우선순위: 이름 시작(0) > 이름 시작+ETF(1) > 이름 포함(2) > 이름 포함+ETF(3) > 기타(4)
+// 정렬 우선순위: 완전일치+주식(0) > 시작+주식(1) > 시작+ETF(2) > 포함+주식(3) > 포함+ETF(4) > 티커(5)
 function _rank(s, ql) {
   const nl = s.n.toLowerCase();
   const isETF = s.m === 'ETF';
-  if (nl.startsWith(ql)) return isETF ? 1 : 0;
-  if (nl.includes(ql))   return isETF ? 3 : 2;
-  return 4;
+  if (nl === ql && !isETF)         return 0;
+  if (nl.startsWith(ql) && !isETF) return 1;
+  if (nl.startsWith(ql) && isETF)  return 2;
+  if (nl.includes(ql) && !isETF)   return 3;
+  if (nl.includes(ql) && isETF)    return 4;
+  return 5;
 }
 
 function onSearchInput(q){
