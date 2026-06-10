@@ -381,6 +381,7 @@ const US_CLASS={
   SHV:'현금성자산',BIL:'현금성자산',SGOV:'현금성자산',CSHI:'현금성자산',
 };
 function getAssetClass(asset){
+  if(asset.assetClass) return asset.assetClass; // Yahoo fetch로 미리 확정된 값 우선
   if(asset.type==='예금') return '예금성자산';
   const s=asset.sector||'';
   const n=(asset.name||'').toLowerCase();
@@ -412,7 +413,59 @@ function getAssetClass(asset){
     if(s==='레버리지'||s==='인버스') return '대체투자자산';
     return '국내주식';
   }
-  return US_CLASS[asset.ticker.toUpperCase()]||'선진국주식';
+  const fromTable = US_CLASS[asset.ticker.toUpperCase()];
+  if(fromTable) return fromTable;
+  // 이름 패턴으로 2차 분류
+  return classifyByName(asset.name)||'선진국주식';
+}
+
+// ETF/주식 이름 키워드 기반 분류 (로컬, API 없음)
+function classifyByName(name){
+  const n=(name||'').toLowerCase();
+  if(/\b(bond|bonds|treasury|treasur|fixed.income|aggregate|credit|note|gilt|corporate bond|high.yield|duration|income fund)\b/.test(n)) return '해외채권';
+  if(/\b(reit|real.estate|realty|property|mortgage|infrastructure|infra)\b/.test(n)) return '해외리츠&인프라';
+  if(/\b(gold|silver|commodity|commodit|precious.metal|crude|oil|natural.gas|energy.futures|bitcoin|crypto|digital.asset|blockchain)\b/.test(n)) return '대체투자자산';
+  if(/\b(emerging|china|india|brazil|korea etf|taiwan|mexico|indonesia|vietnam|latin|frontier)\b/.test(n)) return '신흥국주식';
+  if(/\b(money.market|ultrashort|overnight|t-bill|cash management|liquidity)\b/.test(n)) return '현금성자산';
+  if(/\b(international|foreign|world|europe|japan|asia.pacific|developed|eafe|global)\b/.test(n)) return '선진국주식';
+  return null;
+}
+
+// Yahoo Finance quoteType+sector → 자산군 매핑
+function mapYahooToClass(quoteType, sector, category){
+  if(sector==='Real Estate') return '해외리츠&인프라';
+  if(sector) return '선진국주식'; // 기타 주식 섹터
+  const c=(category||'').toLowerCase();
+  if(/bond|fixed.income|treasury|government|corporate|high.yield|inflation/.test(c)) return '해외채권';
+  if(/money.market|ultrashort|cash/.test(c)) return '현금성자산';
+  if(/real.estate|reit/.test(c)) return '해외리츠&인프라';
+  if(/commodit|precious.metal|gold|energy|natural.resources/.test(c)) return '대체투자자산';
+  if(/digital|crypto|bitcoin/.test(c)) return '대체투자자산';
+  if(/emerging|china|india|brazil|latam|latin|frontier/.test(c)) return '신흥국주식';
+  if(/international|foreign|europe|japan|world|global|developed|eafe/.test(c)) return '선진국주식';
+  return classifyByName(c)||'선진국주식';
+}
+
+// Yahoo quoteSummary 호출 → 자산군 반환 (비동기, 실패 시 null)
+async function fetchYahooSector(ticker){
+  try{
+    const url=`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=quoteType,assetProfile,fundProfile`;
+    const d=await yahooFetch(url);
+    const res=d?.quoteSummary?.result?.[0];
+    if(!res)return null;
+    const qt=res.quoteType?.quoteType;
+    const sector=res.assetProfile?.sector;
+    const category=res.fundProfile?.categoryName;
+    return mapYahooToClass(qt,sector,category);
+  }catch(e){return null;}
+}
+
+// 백그라운드에서 섹터 조회 후 asset.assetClass 갱신
+async function fetchAndSetSector(assetId, ticker){
+  const cls=await fetchYahooSector(ticker);
+  if(!cls)return;
+  const a=state.assets.find(x=>x.id===assetId);
+  if(a)a.assetClass=cls;
 }
 
 // ── Korean unit formatter ──────────────────────────────────────
@@ -526,7 +579,15 @@ function clearResults(){
 // Add from KR DB
 function addAssetFromDB(ticker,name,market,sector){
   const isKR = ticker.endsWith('.KS')||ticker.endsWith('.KS');
-  addAsset({ticker,name,type:market==='ETF'?'ETF':'주식',currency:isKR?'KRW':'USD',amount:'',sector});
+  // KR ETF는 sector 필드로 분류, US는 이름 패턴 우선 → 이후 Yahoo로 보완
+  const nameClass = (!isKR && !sector) ? classifyByName(name) : null;
+  const asset = {ticker,name,type:market==='ETF'?'ETF':'주식',currency:isKR?'KRW':'USD',amount:'',sector};
+  if(nameClass) asset.assetClass = nameClass;
+  addAsset(asset);
+  // US 종목이고 이름 패턴으로 분류 못했을 때만 Yahoo 조회
+  if(!isKR && !nameClass){
+    fetchAndSetSector(asset.id, ticker);
+  }
   document.getElementById('searchInput').value='';
   clearResults();
   document.getElementById('searchHint').innerHTML='국내 종목: 종목명·티커 입력 시 자동완성<br>미국 종목: 티커 직접 입력 후 추가';
@@ -555,7 +616,11 @@ async function addUSStock(){
     const d = await yahooFetch(url);
     const meta = d?.chart?.result?.[0]?.meta;
     const name = meta?.longName||meta?.shortName||ticker;
-    addAsset({ticker,name,type:'주식',currency:'USD',amount:''});
+    const nameClass = classifyByName(name);
+    const asset = {ticker,name,type:'주식',currency:'USD',amount:''};
+    if(nameClass) asset.assetClass = nameClass;
+    addAsset(asset);
+    if(!nameClass) fetchAndSetSector(asset.id, ticker);
     document.getElementById('searchInput').value='';
     clearResults();
   } catch(e){
@@ -683,10 +748,10 @@ async function tryFetch(url, makeProxy) {
   const parsed = JSON.parse(text);
   if (parsed.contents) {
     const inner = JSON.parse(parsed.contents);
-    if (inner?.chart || inner?.quotes) return inner;
+    if (inner?.chart || inner?.quotes || inner?.quoteSummary) return inner;
     throw new Error('empty contents');
   }
-  if (parsed?.chart || parsed?.quotes) return parsed;
+  if (parsed?.chart || parsed?.quotes || parsed?.quoteSummary) return parsed;
   throw new Error('no data');
 }
 
