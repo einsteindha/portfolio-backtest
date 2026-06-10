@@ -199,6 +199,36 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
         <button class="search-btn" onclick="addDeposit()" style="width:100%;margin-top:.75rem;border-radius:var(--radius)">포트폴리오에 추가</button>
       </div>
     </div>
+    <button class="deposit-toggle-btn" id="cashToggleBtn" onclick="toggleCashForm()" style="margin-top:.5rem">+ 예수금 추가</button>
+    <div id="cashFormWrap" style="display:none">
+      <div class="deposit-form">
+        <div>
+          <div class="field-label">상품명</div>
+          <input class="deposit-input" id="cashName" placeholder="예: 예수금">
+        </div>
+        <div class="deposit-row">
+          <div>
+            <div class="field-label">계좌 유형</div>
+            <select class="field-select" id="cashAccountType">
+              <option value="일반">일반계좌 (0.1%)</option>
+              <option value="CMA">CMA (2.0%)</option>
+            </select>
+          </div>
+          <div>
+            <div class="field-label">통화</div>
+            <select class="field-select" id="cashCurrency">
+              <option value="KRW">KRW</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <div class="field-label">투자금액</div>
+          <input class="deposit-input" id="cashAmount" type="number" placeholder="10000000">
+        </div>
+        <button class="search-btn" onclick="addCash()" style="width:100%;margin-top:.75rem;border-radius:var(--radius)">포트폴리오에 추가</button>
+      </div>
+    </div>
   </div>
 
   <div class="section" id="assetListSection" style="display:none">
@@ -670,6 +700,26 @@ function addDeposit(){
   toggleDepositForm();
 }
 
+function toggleCashForm(){
+  const wrap=document.getElementById('cashFormWrap');
+  const btn=document.getElementById('cashToggleBtn');
+  const open=wrap.style.display==='none';
+  wrap.style.display=open?'block':'none';
+  btn.textContent=open?'− 예수금 닫기':'+ 예수금 추가';
+}
+
+function addCash(){
+  const name=document.getElementById('cashName').value.trim()||'예수금';
+  const accountType=document.getElementById('cashAccountType').value;
+  const rate=accountType==='CMA'?2.0:0.1;
+  const amount=document.getElementById('cashAmount').value;
+  const currency=document.getElementById('cashCurrency').value;
+  addAsset({ticker:'CASH',name,type:'예금',isCash:true,assetClass:'현금성자산',amount,currency,rate,compound:'annual'});
+  toggleCashForm();
+  document.getElementById('cashName').value='';
+  document.getElementById('cashAmount').value='';
+}
+
 // ── Asset list ─────────────────────────────────────────────────
 function addAsset(a){
   a.id=++state.idCounter;
@@ -694,7 +744,7 @@ function renderAssetList(){
       <div class="asset-item-header">
         <div>
           <div class="asset-name">${escHtml(a.name)}${mktBadge}</div>
-          <div class="asset-ticker">${a.ticker}${isDeposit?` · ${a.rate}% (${a.compound==='annual'?'연복리':a.compound==='monthly'?'월복리':'단리'})`:''}</div>
+          <div class="asset-ticker">${a.ticker}${isDeposit?` · ${a.rate||0}% (${a.isCash?'예탁금 이용료':a.compound==='annual'?'연복리':a.compound==='monthly'?'월복리':'단리'})`:''}</div>
         </div>
         <button class="asset-remove" onclick="removeAsset(${a.id})">×</button>
       </div>
