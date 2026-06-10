@@ -357,7 +357,8 @@ const CLASS_COLORS={
   '국내주식':'#185FA5','선진국주식':'#D85A30','신흥국주식':'#BA7517',
   '국내채권':'#1D9E75','해외채권':'#2a7c6f',
   '국내리츠&인프라':'#993556','해외리츠&인프라':'#E15B85',
-  '현금성자산':'#5C8FA0','예금성자산':'#B8A060','대체투자자산':'#8B6914'
+  '현금성자산':'#5C8FA0','예금성자산':'#B8A060','대체투자자산':'#8B6914',
+  '혼합형':'#7B5EA7'
 };
 const US_CLASS={
   SPY:'선진국주식',IVV:'선진국주식',VOO:'선진국주식',QQQ:'선진국주식',VTI:'선진국주식',
@@ -387,6 +388,14 @@ function getAssetClass(asset){
   const n=(asset.name||'').toLowerCase();
   const isKS=asset.ticker.endsWith('.KS');
   if(isKS){
+    // 혼합형 최우선 — sector 무관하게 혼합/TDF/멀티에셋이면 혼합형
+    if(/혼합|tdf|멀티에셋/.test(n)) return '혼합형';
+    // 리츠/인프라 — sector가 '기타'인 상장 리츠·인프라 펀드 대응
+    if(/리츠|reit/.test(n)){
+      if(/미국|해외|글로벌|msci|global/.test(n)) return '해외리츠&인프라';
+      return '국내리츠&인프라';
+    }
+    if(/맥쿼리인프라|발해인프라/.test(n)) return '국내리츠&인프라';
     if(!asset.type||asset.type==='주식'||s==='국내주식'||s==='기타'||s==='') return '국내주식';
     if(s==='해외주식'){
       if(/신흥|중국|인도|베트남|이머징|em/.test(n)) return '신흥국주식';
@@ -411,6 +420,11 @@ function getAssetClass(asset){
       return '선진국주식';
     }
     if(s==='레버리지'||s==='인버스') return '대체투자자산';
+    // sector='ETF'(미분류) 이름 패턴 분류
+    if(/금현물|골드|금선물|구리실물|실버|귀금속|원유|원자재|농산물|팔라듐|탄소배출권|천연가스|콩선물/.test(n)) return '대체투자자산';
+    if(/인프라/.test(n)) return '해외리츠&인프라';
+    if(/머니마켓|통안채/.test(n)) return '현금성자산';
+    if(/종합채권|단기채권|금리채|국공채|금융채|특수채/.test(n)) return '국내채권';
     return '국내주식';
   }
   const fromTable = US_CLASS[asset.ticker.toUpperCase()];
