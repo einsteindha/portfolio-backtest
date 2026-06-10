@@ -1351,9 +1351,12 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
     const leg=document.getElementById('mainLegend');
     if(leg)leg.innerHTML=datasets.map(d=>`<span class="legend-item"><span class="legend-dot" style="background:${d.borderColor}"></span>${d.label}</span>`).join('');
 
+    // 입력 금액 → 기준통화 환산 (수익-위험·자산군 차트 공용)
+    const toBase=a=>{let v=Number(a.amount)||0;if(applyFX){if(a.currency==='USD'&&baseCurrency==='KRW')v*=1350;else if(a.currency==='KRW'&&baseCurrency==='USD')v/=1350;}return v;};
+    const totalInputAmt=assets.reduce((s,a)=>s+toBase(a),0)||1;
+
     // ── 수익-위험 지도 ──────────────────────────────────────────
     const endP=r.portValues[r.portValues.length-1];
-    const totalInit=r.portValues[0].assetVals.reduce((s,v)=>s+v,0)||1;
     const rrDatasets=[];
     const legendItems=[];
     assets.forEach((a,i)=>{
@@ -1366,7 +1369,7 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
       if(!pm)return;
       const cls=getAssetClass(a);
       const col=CLASS_COLORS[cls]||'#999';
-      const wPct=r.portValues[0].assetVals[i]/totalInit*100;
+      const wPct=toBase(a)/totalInputAmt*100;
       const radius=Math.max(5,Math.min(18,wPct*0.45+5));
       rrDatasets.push({
         label:a.name||a.ticker,
@@ -1404,7 +1407,7 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
     const classMap={};
     assets.forEach((a,i)=>{
       const cls=getAssetClass(a);
-      const w=r.portValues[0].assetVals[i]/totalInit*100;
+      const w=toBase(a)/totalInputAmt*100;
       classMap[cls]=(classMap[cls]||0)+w;
     });
     const classEntries=Object.entries(classMap).filter(([,v])=>v>0.01).sort((a,b)=>b[1]-a[1]);
