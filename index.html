@@ -324,35 +324,35 @@ const ETF_PROXY_MAP = {
   '229200.KS': {proxy:'^KQ11', label:'KOSDAQ 지수'},
   '379800.KS': {proxy:'SPY',   label:'S&P500(SPY)'},
   '360750.KS': {proxy:'SPY',   label:'S&P500(SPY)'},
-  '411060.KS': {proxy:'SPY',   label:'S&P500(SPY)'},
-  '140710.KS': {proxy:'SPY',   label:'S&P500(SPY)'},
+  '411060.KS': {proxy:'GLD',   label:'금(GLD)'},
+  '140710.KS': {proxy:'^KS11', label:'KOSPI 지수'},
   '133690.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},
   '367380.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},
   '406970.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},
-  '438330.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},
-  '381170.KS': {proxy:'SOXX',  label:'필라델피아반도체(SOXX)'},
+  '438330.KS': {proxy:'IEF',   label:'미국중기채(IEF)'},
+  '381170.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},
   '091160.KS': {proxy:'SOXX',  label:'필라델피아반도체(SOXX)'},
   '091170.KS': {proxy:'XLF',   label:'금융섹터(XLF)'},
-  '244620.KS': {proxy:'CARZ',  label:'글로벌자동차(CARZ)'},
-  '139220.KS': {proxy:'XLK',   label:'테크섹터(XLK)'},
+  '244620.KS': {proxy:'^KS11', label:'KOSPI 지수'},
+  '139220.KS': {proxy:'^KS11', label:'KOSPI 지수'},
   '098560.KS': {proxy:'XLC',   label:'커뮤니케이션(XLC)'},
   '195930.KS': {proxy:'EFA',   label:'MSCI EAFE(EFA)'},
   '192090.KS': {proxy:'MCHI',  label:'MSCI China(MCHI)'},
   '396520.KS': {proxy:'MCHI',  label:'MSCI China(MCHI)'},
-  '364980.KS': {proxy:'EWJ',   label:'MSCI Japan(EWJ)'},
-  '441680.KS': {proxy:'INDA',  label:'MSCI India(INDA)'},
-  '245340.KS': {proxy:'VGK',   label:'MSCI Europe(VGK)'},
-  '459580.KS': {proxy:'SCHD',  label:'미국배당(SCHD)'},
-  '448290.KS': {proxy:'SCHD',  label:'미국배당(SCHD)'},
+  '364980.KS': {proxy:'LIT',   label:'배터리(LIT)'},
+  '441680.KS': {proxy:'QQQ',   label:'나스닥100(QQQ)'},
+  '245340.KS': {proxy:'SPY',   label:'S&P500(SPY)'},
+  '459580.KS': {proxy:'SHY',   label:'미국단기채(SHY)'},
+  '448290.KS': {proxy:'SPY',   label:'S&P500(SPY)'},
   '400810.KS': {proxy:'VNQ',   label:'미국리츠(VNQ)'},
   '329200.KS': {proxy:'VNQ',   label:'미국리츠(VNQ)'},
   '132030.KS': {proxy:'GLD',   label:'금(GLD)'},
-  '319640.KS': {proxy:'USO',   label:'원유(USO)'},
+  '319640.KS': {proxy:'GLD',   label:'금(GLD)'},
   '308620.KS': {proxy:'TLT',   label:'미국장기채(TLT)'},
   '305080.KS': {proxy:'TLT',   label:'미국장기채(TLT)'},
   '114820.KS': {proxy:'IEI',   label:'미국중기채(IEI)'},
-  '130680.KS': {proxy:'IEI',   label:'미국중기채(IEI)'},
-  '385560.KS': {proxy:'SHY',   label:'미국단기채(SHY)'},
+  '130680.KS': {proxy:'USO',   label:'원유(USO)'},
+  '385560.KS': {proxy:'TLT',   label:'미국장기채(TLT)'},
   '357870.KS': {proxy:'SHY',   label:'미국단기채(SHY)'},
 };
 
@@ -418,8 +418,8 @@ function getAssetClass(asset){
   const n=(asset.name||'').toLowerCase();
   const isKS=asset.ticker.endsWith('.KS');
   if(isKS){
-    // 혼합형 최우선 — sector 무관하게 혼합/TDF/멀티에셋이면 혼합형
-    if(/혼합|tdf|멀티에셋/.test(n)) return '혼합형';
+    // 혼합형 최우선 — sector 무관하게 혼합/TDF/TRF/멀티에셋/글로벌자산배분이면 혼합형
+    if(/혼합|tdf|trf|멀티에셋|글로벌자산배분/.test(n)) return '혼합형';
     // 리츠/인프라 — sector가 '기타'인 상장 리츠·인프라 펀드 대응
     if(/리츠|reit/.test(n)){
       if(/미국|해외|글로벌|msci|global/.test(n)) return '해외리츠&인프라';
@@ -451,10 +451,13 @@ function getAssetClass(asset){
     }
     if(s==='레버리지'||s==='인버스') return '대체투자자산';
     // sector='ETF'(미분류) 이름 패턴 분류
-    if(/금현물|골드|금선물|구리실물|실버|귀금속|원유|원자재|농산물|팔라듐|탄소배출권|천연가스|콩선물/.test(n)) return '대체투자자산';
+    if(/금현물|골드|금선물|은선물|금은선물|구리실물|실버|귀금속|원유|원자재|농산물|팔라듐|탄소배출권|천연가스|콩선물/.test(n)) return '대체투자자산';
     if(/인프라/.test(n)) return '해외리츠&인프라';
-    if(/머니마켓|통안채/.test(n)) return '현금성자산';
+    if(/머니마켓|통안채|cd금리|sofr|kofr|단기변동금리|전단채/.test(n)) return '현금성자산';
     if(/종합채권|단기채권|금리채|국공채|금융채|특수채/.test(n)) return '국내채권';
+    if(/신흥|베트남|이머징/.test(n)) return '신흥국주식';
+    if(/코스닥|코스피/.test(n)) return '국내주식';
+    if(/미국|글로벌|월드/.test(n)) return '선진국주식';
     return '국내주식';
   }
   const fromTable = US_CLASS[asset.ticker.toUpperCase()];
