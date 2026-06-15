@@ -1172,10 +1172,24 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
     const last=portValues[portValues.length-1];
     const fxEnd=getFX(last.year,last.month);
     const fxMultiplier=fxEnd/fxStart;
-    const localMultiplier=(1+(finalVal-initVal)/initVal)/fxMultiplier;
-    const localReturn=(localMultiplier-1)*100;
     const fxChange=(fxMultiplier-1)*100;
-    fxEffect={fxChange,localReturn};
+    // USD/KRW 서브포트폴리오 분리: 첫 달 비중 기준으로 각각 수익 분해
+    const pv0=portValues[0];
+    const initUSDVal=pv0.assetVals.reduce((s,v,i)=>s+(assets[i].currency==='USD'?v:0),0);
+    const initKRWVal=pv0.assetVals.reduce((s,v,i)=>s+(assets[i].currency!=='USD'?v:0),0);
+    const finalUSDVal=last.assetVals.reduce((s,v,i)=>s+(assets[i].currency==='USD'?v:0),0);
+    const finalKRWVal=last.assetVals.reduce((s,v,i)=>s+(assets[i].currency!=='USD'?v:0),0);
+    const usdFraction=initVal>0?initUSDVal/initVal:0;
+    const krwFraction=initVal>0?initKRWVal/initVal:0;
+    // USD 서브포트: 곱셈 분해로 환율 효과 제거 (교차항 포함, 정확)
+    const usdRetKRW=initUSDVal>0?finalUSDVal/initUSDVal-1:0;
+    const usdRetLocal=initUSDVal>0?(1+usdRetKRW)/fxMultiplier-1:0;
+    // KRW 서브포트: 환율 무관, 로컬 수익 = KRW 수익
+    const krwRet=initKRWVal>0?finalKRWVal/initKRWVal-1:0;
+    // 포트폴리오 로컬 수익 = 초기 비중 가중 평균
+    const localReturn=(usdFraction*usdRetLocal+krwFraction*krwRet)*100;
+    const fxContribution=(finalVal-initVal)/initVal*100-localReturn;
+    fxEffect={fxChange,fxContribution,localReturn,usdFraction};
   }
 
   return{portValues,cagr,annualVol,sharpe,mdd,mddDate,annualRetArr,corrMatrix,fxEffect,
@@ -1285,7 +1299,7 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
   corrHTML+='</table></div>';
   // 환율 섹션: USD 자산이 있을 때만 표시
   const hasUSD=assets.some(a=>a.currency==='USD');
-  const fxHTML=(applyFX&&r.fxEffect&&hasUSD)?`<div class="chart-section"><div class="chart-header"><div class="chart-title">환율 영향 분리</div></div><div class="fx-grid"><div class="metric-card"><div class="metric-label">포트폴리오 전체 수익</div><div class="metric-value ${r.totalReturn>=0?'positive':'negative'}">${pct(r.totalReturn)}</div><div class="metric-sub">FX 포함 누적 총수익률</div></div><div class="metric-card"><div class="metric-label">환율 변동 기여</div><div class="metric-value ${r.fxEffect.fxChange>=0?'positive':'negative'}">${pct(r.fxEffect.fxChange)}</div><div class="metric-sub">KRW/USD 환율 변화 효과</div></div><div class="metric-card"><div class="metric-label">로컬 수익 (환율 제외)</div><div class="metric-value ${r.fxEffect.localReturn>=0?'positive':'negative'}">${pct(r.fxEffect.localReturn)}</div><div class="metric-sub">순수 자산가격 변동 기여</div></div></div></div>`:'';
+  const fxHTML=(applyFX&&r.fxEffect&&hasUSD)?`<div class="chart-section"><div class="chart-header"><div class="chart-title">환율 영향 분리</div></div><div class="fx-grid"><div class="metric-card"><div class="metric-label">포트폴리오 전체 수익</div><div class="metric-value ${r.totalReturn>=0?'positive':'negative'}">${pct(r.totalReturn)}</div><div class="metric-sub">FX 포함 누적 총수익률</div></div><div class="metric-card"><div class="metric-label">환율 변동 기여</div><div class="metric-value ${r.fxEffect.fxContribution>=0?'positive':'negative'}">${pct(r.fxEffect.fxContribution)}</div><div class="metric-sub">USD ${(r.fxEffect.usdFraction*100).toFixed(0)}% 비중 · KRW/USD ${r.fxEffect.fxChange>=0?'+':''}${r.fxEffect.fxChange.toFixed(1)}%</div></div><div class="metric-card"><div class="metric-label">로컬 수익 (환율 제외)</div><div class="metric-value ${r.fxEffect.localReturn>=0?'positive':'negative'}">${pct(r.fxEffect.localReturn)}</div><div class="metric-sub">순수 자산가격 변동 기여</div></div></div></div>`:'';
 
   // 공통 기간: 가장 늦게 시작하는 종목의 시작월
   let latestFirst={year:r.commonStart.year,month:r.commonStart.month};
