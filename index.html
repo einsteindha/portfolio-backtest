@@ -1090,13 +1090,14 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
           if(!active[i])return s;
           return s+(a.type==='예금'?units[i]:(curP[i]??0)*units[i]);
         },0);
-        // 신규 자산 매수: 포트폴리오 총액 × 해당 자산 목표비중 (기존 자산 건드리지 않음)
-        newOnes.forEach((isNew,i)=>{
-          if(!isNew)return;
-          const cap=portTotal*targetW[i];
-          const a=assets[i];
-          if(a.type==='예금'){units[i]=cap;}
-          else if(curP[i]){units[i]=cap/curP[i];}
+        // 신규 자산 편입: 기존+신규 자산 전체 리밸런싱 (총액 보존, 인위적 수익 방지)
+        const joinMask=assets.map((_,i)=>(active[i]||newOnes[i])&&avail[i]);
+        const effW=getEffW(joinMask);
+        assets.forEach((a,i)=>{
+          if(!joinMask[i])return;
+          const target=portTotal*effW[i];
+          if(a.type==='예금'){units[i]=target;return;}
+          if(curP[i])units[i]=target/curP[i];
           active[i]=true;
         });
       }
