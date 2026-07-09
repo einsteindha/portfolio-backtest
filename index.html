@@ -795,16 +795,14 @@ function updateTotal(){
 }
 
 // ── Data fetching ──────────────────────────────────────────────
-// Proxy list
+// Proxy list (direct fetch/corsproxy.io/thingproxy/codetabs는 모두 죽었거나
+// CORS 차단·서비스 다운 상태로 확인됨 — allorigins만 생존)
 const PROXIES = [
   url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  url => `https://thingproxy.freeboard.io/fetch/${url}`,
-  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
 ];
 
 // Cache the first working proxy — reuse for all subsequent requests
-let _workingProxyIdx = -1; // -1 = direct, 0~3 = PROXIES index
+let _workingProxyIdx = -1; // -1 = 미발견, 0~ = PROXIES index
 
 async function tryFetch(url, makeProxy) {
   const proxyUrl = makeProxy ? makeProxy(url) : url;
@@ -822,6 +820,8 @@ async function tryFetch(url, makeProxy) {
   throw new Error('no data');
 }
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function yahooFetch(url) {
   // If we already know a working proxy, use it directly
   if (_workingProxyIdx !== -1) {
@@ -833,30 +833,20 @@ async function yahooFetch(url) {
     }
   }
 
-  // Race: try direct + all proxies simultaneously, take first success
-  const candidates = [
-    { idx: -1, fn: () => tryFetch(url, null) },
-    ...PROXIES.map((p, i) => ({ idx: i, fn: () => tryFetch(url, p) }))
-  ];
-
-  return new Promise((resolve, reject) => {
-    let settled = 0;
-    let resolved = false;
-    candidates.forEach(({ idx, fn }) => {
-      fn().then(data => {
-        if (!resolved) {
-          resolved = true;
-          _workingProxyIdx = idx; // cache winner
-          resolve(data);
-        }
-      }).catch(() => {
-        settled++;
-        if (settled === candidates.length && !resolved) {
-          reject(new Error('데이터를 가져올 수 없습니다 (모든 경로 실패)'));
-        }
-      });
-    });
-  });
+  // 무료 프록시 1개에만 의존하는 구조라 순간 부하로 403/429가 나기 쉬움 —
+  // 실패 시 짧은 backoff를 두고 재시도
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const results = await Promise.any(
+        PROXIES.map((p, idx) => tryFetch(url, p).then(data => ({ idx, data })))
+      );
+      _workingProxyIdx = results.idx; // cache winner
+      return results.data;
+    } catch (e) {
+      if (attempt < 2) await sleep(500 * (attempt + 1));
+    }
+  }
+  throw new Error('데이터를 가져올 수 없습니다 (모든 경로 실패)');
 }
 
 async function fetchMonthlyPrices(ticker,startYear,endYear){
@@ -1199,6 +1189,21 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
       `데이터 가용 기간: ${portfolioCS.year}년 ${portfolioCS.month}월부터`:null};
 }
 
+// 동시 실행 개수를 limit으로 제한하며 items를 처리, Promise.allSettled와 동일한 형태({status,value|reason}[])로 반환
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      try { results[i] = { status: 'fulfilled', value: await fn(items[i], i) }; }
+      catch (e) { results[i] = { status: 'rejected', reason: e }; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 // ── Run ────────────────────────────────────────────────────────
 async function runBacktest(){
   if(!state.assets.length){alert('종목을 1개 이상 추가하세요.');return;}
@@ -1222,9 +1227,9 @@ async function runBacktest(){
 
     const warnings=[];
 
-    // Fetch all assets in parallel
-    const fetchResults = await Promise.allSettled(
-      state.assets.map(async (asset, i) => {
+    // Fetch assets with limited concurrency — 무료 프록시 1개(allorigins)에
+    // 종목 수만큼 한꺼번에 몰리면 순간 부하로 대부분 실패하므로 동시 처리 수를 제한
+    const fetchResults = await mapWithConcurrency(state.assets, 2, async (asset, i) => {
         const a = {...asset};
         updateLoadingStep(i+1,'active');
         if(a.type==='예금'){
@@ -1237,8 +1242,7 @@ async function runBacktest(){
         if(proxyNote) a.proxyNote=proxyNote;
         updateLoadingStep(i+1,'done');
         return a;
-      })
-    );
+    });
 
     const assetsWithData=[];
     fetchResults.forEach((result, i) => {
