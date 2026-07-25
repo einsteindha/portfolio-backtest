@@ -959,7 +959,7 @@ function computeMetrics(pv){
 
 // 개별 자산 가격 배열로부터 CAGR/변동성 계산
 function computePriceMetrics(prices,csYear,csMonth,endYear,endMonth){
-  const sub=prices.filter(p=>{const pm=p.year*12+p.month;return pm>=csYear*12+csMonth&&pm<=endYear*12+endMonth;});
+  const sub=prices.filter(p=>{if(p.price==null)return false;const pm=p.year*12+p.month;return pm>=csYear*12+csMonth&&pm<=endYear*12+endMonth;});
   if(sub.length<2)return null;
   const returns=[];
   for(let k=1;k<sub.length;k++)returns.push((sub[k].price-sub[k-1].price)/sub[k-1].price);
@@ -1183,7 +1183,13 @@ function runBacktestEngine(assets,fxData,startYear,endYear,rebalance,baseCurrenc
     fxEffect={fxChange,fxContribution,localReturn,usdFraction};
   }
 
-  return{portValues,cagr,annualVol,sharpe,mdd,mddDate,annualRetArr,corrMatrix,fxEffect,
+  // 개별 자산 점(수익-위험 지도)용 시리즈: 포트폴리오와 동일하게 FX 환산 + forward-fill 반영
+  const priceSeries=assets.map((a,i)=>{
+    if(a.type==='예금')return [];
+    return months.map(mn=>({year:mn.year,month:mn.month,price:getBasePrice(a,priceMaps[i],mn.year,mn.month)}));
+  });
+
+  return{portValues,cagr,annualVol,sharpe,mdd,mddDate,annualRetArr,corrMatrix,fxEffect,priceSeries,
     totalReturn:(finalVal-initVal)/initVal*100,initVal,finalVal,commonStart:portfolioCS,
     dataStartNote:portfolioCS&&(portfolioCS.year>startYear||(portfolioCS.year===startYear&&portfolioCS.month>1))?
       `데이터 가용 기간: ${portfolioCS.year}년 ${portfolioCS.month}월부터`:null};
@@ -1385,8 +1391,8 @@ function renderResults(r,assets,baseCurrency,warnings,applyFX){
       let pm=null;
       if(a.type==='예금'){
         pm={cagr:a.rate||0,vol:0};
-      } else if(a.prices&&a.prices.length>=2){
-        pm=computePriceMetrics(a.prices,r.commonStart.year,r.commonStart.month,endP.year,endP.month);
+      } else if(r.priceSeries&&r.priceSeries[i]&&r.priceSeries[i].length>=2){
+        pm=computePriceMetrics(r.priceSeries[i],r.commonStart.year,r.commonStart.month,endP.year,endP.month);
       }
       if(!pm)return;
       const cls=getAssetClass(a);
