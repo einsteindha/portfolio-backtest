@@ -794,59 +794,15 @@ function updateTotal(){
   document.getElementById('totalAmount').textContent=total?fmt:'—';
 }
 
-// ── Data fetching ──────────────────────────────────────────────
-// Proxy list (direct fetch/corsproxy.io/thingproxy/codetabs는 모두 죽었거나
-// CORS 차단·서비스 다운 상태로 확인됨 — allorigins만 생존)
-const PROXIES = [
-  url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-];
-
-// Cache the first working proxy — reuse for all subsequent requests
-let _workingProxyIdx = -1; // -1 = 미발견, 0~ = PROXIES index
-
-async function tryFetch(url, makeProxy) {
-  const proxyUrl = makeProxy ? makeProxy(url) : url;
-  const r = await fetch(proxyUrl, {signal: AbortSignal.timeout(8000)});
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const text = await r.text();
-  if (!text || text.startsWith('<')) throw new Error('HTML response');
-  const parsed = JSON.parse(text);
-  if (parsed.contents) {
-    const inner = JSON.parse(parsed.contents);
-    if (inner?.chart || inner?.quotes || inner?.quoteSummary) return inner;
-    throw new Error('empty contents');
-  }
-  if (parsed?.chart || parsed?.quotes || parsed?.quoteSummary) return parsed;
-  throw new Error('no data');
-}
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+// ── Data fetching (Cloudflare Worker proxy) ─────────────────────
+const WORKER_PROXY = 'https://asset-allocation-proxy.einsteindha.workers.dev';
 
 async function yahooFetch(url) {
-  // If we already know a working proxy, use it directly
-  if (_workingProxyIdx !== -1) {
-    try {
-      return await tryFetch(url, PROXIES[_workingProxyIdx]);
-    } catch(e) {
-      // Cached proxy failed — reset and rediscover
-      _workingProxyIdx = -1;
-    }
-  }
-
-  // 무료 프록시 1개에만 의존하는 구조라 순간 부하로 403/429가 나기 쉬움 —
-  // 실패 시 짧은 backoff를 두고 재시도
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const results = await Promise.any(
-        PROXIES.map((p, idx) => tryFetch(url, p).then(data => ({ idx, data })))
-      );
-      _workingProxyIdx = results.idx; // cache winner
-      return results.data;
-    } catch (e) {
-      if (attempt < 2) await sleep(500 * (attempt + 1));
-    }
-  }
-  throw new Error('데이터를 가져올 수 없습니다 (모든 경로 실패)');
+  const r = await fetch(`${WORKER_PROXY}/?url=${encodeURIComponent(url)}`, {signal: AbortSignal.timeout(15000)});
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const parsed = await r.json();
+  if (parsed?.chart || parsed?.quotes || parsed?.quoteSummary) return parsed;
+  throw new Error('no data');
 }
 
 async function fetchMonthlyPrices(ticker,startYear,endYear){
